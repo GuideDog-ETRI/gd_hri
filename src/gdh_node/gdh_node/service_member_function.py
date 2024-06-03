@@ -117,6 +117,18 @@ class GDHService(Node):
         return response
     
 
+    def det_result_to_gdi_code(self, class_index):
+        # class_index to gdi object index and status index
+
+        import pdb
+        pdb.set_trace()
+
+        res_obj_type = 0
+        res_obj_status = 0
+
+        return res_obj_type, res_obj_status
+
+
     def detect_common(self, list_imgs, response):
         # run yolo            
         results = self.yolo_model.predict(source=list_imgs)
@@ -134,12 +146,14 @@ class GDHService(Node):
                 box_xywh = [float(item.item()) for item in boxes_xywh[i_box]]
                 cls = int(boxes_cls[i_box].item())
 
+                obj_type, obj_status = self.det_result_to_gdi_code(cls)
+
                 if conf >= self.yolo_conf_threshold:
                     box2d = BoundingBox2D(center=Pose2D(position=Point2D(x=box_xywh[0], y=box_xywh[1]), 
                                                         theta=float(0.0)), 
                                             size_x=box_xywh[2], size_y=box_xywh[3])
                     det_res = GDHDetection2DExt(cam_id=cam_id, theta=float(0.0), hfov=float(0.0), 
-                                                obj_type=cls, obj_status=0,
+                                                obj_type=obj_type, obj_status=obj_status,
                                                 bbox=box2d)
                     # std_msgs/Header header
                     response.detections.append(det_res)
@@ -166,9 +180,11 @@ class GDHService(Node):
             else:
                 response = self.detect_common(list_imgs, response)
 
-                list_target_objects = request.object_name
+                list_target_object_names = request.object_names
+                # list_target_object_types = request.object_types
+
                 detections_filtered = [item for item in response.detections 
-                                    if self.yolo_model.names[int(item.obj_type)] in list_target_objects]
+                                    if self.yolo_model.names[int(item.obj_type)] in list_target_object_names]
                 response.detections = detections_filtered
 
                 if len(response.detections) > 0:
