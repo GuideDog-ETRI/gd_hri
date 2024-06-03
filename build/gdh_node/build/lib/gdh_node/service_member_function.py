@@ -7,7 +7,7 @@ from gdh_interfaces.msg import GDHDetection2DExt
 import rclpy
 from rclpy.node import Node
 
-from PIL import Image
+from PIL import Image as PilImage
 import numpy as np
 from ultralytics import YOLO
 from vision_msgs.msg import BoundingBox2D, Pose2D, Point2D
@@ -72,15 +72,14 @@ class GDHService(Node):
                 hfov = [hfov]
 
             for th, hf in zip(theta, hfov):
-                if th < 90:
-                    img = Image.open("street1.jpg")
+                if th < 180:
+                    img = PilImage.open("street1.jpg")
                 else:
-                    img = Image.open("street2.jpg")
+                    img = PilImage.open("street2.jpg")
                 
                 res_imgs.append(img)
         else:
-            # use gopro
-            # img = Image.open("street1.jpg")
+            # use gopro or webcam
             if self.latest_gopro_image is not None:
                 res_imgs.append(self.latest_gopro_image)
             else:
@@ -92,8 +91,6 @@ class GDHService(Node):
     def init_detector(self, request, response):
         try:
             # Load a model
-            # import pdb
-            # pdb.set_trace()
             repo = "models/gd_demo/train958/weights/best.pt"
             self.yolo_model = YOLO(repo)
             response.errcode = response.ERR_NONE
@@ -117,6 +114,58 @@ class GDHService(Node):
         return response
     
 
+    def det_result_to_gdi_code(self, class_index):
+        # class_index to gdi object index and status index
+        #  
+        #{0: 'door closed', 1: 'door semi-open', 2: 'door open', 
+        # 3: 'pedestrian traffic light red', 4: 'pedestrian traffic light green', 
+        # 5: 'stairs', 6: 'escalator', 7: 'subway entrance', 
+        # 8: 'automatic door', 9: 'elevator door', 10: 'elevator button', 11: 'subway ticket gate each', 
+        # 12: 'subway ticket gate handicap', 13: 'subway ticket gate all', 
+        # 14: 'subway screen door'}
+
+        # class_name = self.yolo_model.names[int(class_index)]
+
+        res_obj_status = 0
+        if class_index in [0, 1, 2]:
+            res_obj_type = 10   # DOOR
+            if class_index == 0:
+                res_obj_status = 4  # closed
+            elif class_index == 1:
+                res_obj_status = 5  # semi-open
+            elif class_index == 2:
+                res_obj_status = 3  # open
+
+        elif class_index in [3, 4]:
+            res_obj_type = 61   # PEDESTRIAN_TRAFFIC_LIGHT
+            if class_index == 3:
+                res_obj_status = 10     # RED
+            else:
+                res_obj_status = 11     # GREEN
+        elif class_index == 5:
+            res_obj_type = 50   # STAIRS
+        elif class_index == 6:
+            res_obj_type = 40   # ESCALATOR
+        elif class_index == 7:
+            res_obj_type = 70   # SUBWAY_GATE
+        elif class_index == 8:
+            res_obj_type = 20   # AUTOMATIC_DOOR
+        elif class_index == 9:
+            res_obj_type = 30   # ELEVATOR_DOOR
+        elif class_index == 10:
+            res_obj_type = 31   # ELEVATOR_BUTTON
+        elif class_index == 11:
+            res_obj_type = 80   # 
+        elif class_index == 12:
+            res_obj_type = 81   # 
+        elif class_index == 13:
+            res_obj_type = 82   # 
+        elif class_index == 14:
+            res_obj_type = 90   # SUBWAY_SCREEN_DOOR
+
+        return res_obj_type, res_obj_status
+
+
     def detect_common(self, list_imgs, response):
         # run yolo            
         results = self.yolo_model.predict(source=list_imgs)
@@ -134,12 +183,14 @@ class GDHService(Node):
                 box_xywh = [float(item.item()) for item in boxes_xywh[i_box]]
                 cls = int(boxes_cls[i_box].item())
 
+                obj_type, obj_status = self.det_result_to_gdi_code(cls)
+
                 if conf >= self.yolo_conf_threshold:
                     box2d = BoundingBox2D(center=Pose2D(position=Point2D(x=box_xywh[0], y=box_xywh[1]), 
                                                         theta=float(0.0)), 
                                             size_x=box_xywh[2], size_y=box_xywh[3])
                     det_res = GDHDetection2DExt(cam_id=cam_id, theta=float(0.0), hfov=float(0.0), 
-                                                obj_type=cls, obj_status=0,
+                                                obj_type=obj_type, obj_status=obj_status,
                                                 bbox=box2d)
                     # std_msgs/Header header
                     response.detections.append(det_res)
@@ -166,9 +217,14 @@ class GDHService(Node):
             else:
                 response = self.detect_common(list_imgs, response)
 
-                list_target_objects = request.object_name
+                # list_target_object_names = request.object_names
+                # detections_filtered = [item for item in response.detections 
+                #                     if self.yolo_model.names[int(item.obj_type)] in list_target_object_names]
+                
+                list_target_object_types = request.object_types
                 detections_filtered = [item for item in response.detections 
-                                    if self.yolo_model.names[int(item.obj_type)] in list_target_objects]
+                                    if int(item.obj_type) in list_target_object_types]
+                
                 response.detections = detections_filtered
 
                 if len(response.detections) > 0:
@@ -206,7 +262,11 @@ class GDHService(Node):
         if self.yolo_model is None:
             response.errcode = response.NO_MODEL
         else:
-            ret_img, list_imgs = self.get_image(1, theta=self.theta_all, hfov=self.hfov_all)
+            ret_img0, list_imgs0 = self.get_image(0, theta=self.theta_all, hfov=self.hfov_all)
+            ret_img1, list_imgs1 = self.get_image(1)    # web or gopro
+
+            ret_img = ret_img0 * ret_img1
+            list_imgs = list_imgs0 + list_imgs1
 
             if not ret_img:
                 response.errcode = response.NO_IMAGE

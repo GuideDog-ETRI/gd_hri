@@ -1,7 +1,6 @@
 import sys
 
-# from gdh_interfaces.srv import GDHDetectStaticObjectAll
-from gdh_interfaces.srv import GDHDetectStaticTargetObject
+from gdh_interfaces.srv import GDHDetectStaticObjectAll, GDHDetectStaticTargetObject
 
 import rclpy
 from rclpy.node import Node
@@ -13,14 +12,17 @@ class MinimalClientAsync(Node):
         super().__init__('minimal_client_async')
 
 
-        # self.cli = self.create_client(GDHDetectStaticObjectAll, 'GDH_detect_all')
-        self.cli = self.create_client(GDHDetectStaticTargetObject, 'GDH_detect_target')
+        self.cli = self.create_client(GDHDetectStaticObjectAll, 'GDH_detect_all')
+        # self.cli = self.create_client(GDHDetectStaticTargetObject, 'GDH_detect_target')
         while not self.cli.wait_for_service(timeout_sec=1.0):
             self.get_logger().info('service not available, waiting again...')
-        self.req = GDHDetectStaticTargetObject.Request()
+        # self.req = GDHDetectStaticTargetObject.Request()
+        self.req = GDHDetectStaticObjectAll.Request()
 
     def send_request(self):
-        self.req.object_name = ['stairs', 'door closed', 'escalator', 'subway entrance', 'door open']
+        #self.req.object_name = ['stairs', 'door closed', 'escalator', 'subway entrance', 'door open']
+        # self.future = self.cli.call_async(self.req)
+
         self.future = self.cli.call_async(self.req)
 
 
