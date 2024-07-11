@@ -1,0 +1,22 @@
+# assisting guidance command
+uint8 cmd
+uint8 GO_FORWARD=0	    # move forward along the road
+uint8 GO_LEFT=1		    # turn left at the first intersection and then move forward
+uint8 GO_RIGHT=2	    # turn rgiht at the first intersection and then move forward
+uint8 GO_BACKWARD=3	    # turn back and move in the opposite direction of the road
+uint8 GOTO_OBJECT=4	    # guide to a specified object
+
+# object type (valid only when cmd == GOTO_OBJECT)
+uint8 type
+uint8 DOOR=10                   # door
+uint8 ELEVATOR_DOOR=30          # elevator
+uint8 ESCALATOR=40              # escalator
+uint8 STAIRS=50                 # stair entrance
+uint8 CROSSWALK=60              # crosswalk entrance
+uint8 SUBWAY_GATE=70            # subway entrance/exit
+uint8 SUBWAY_TICKET_GATE=80     # subway ticket gate
+uint8 SUBWAY_SCREEN_DOOR=90     # subway screen door
+---
+uint8 errcode 0
+uint8 ERR_NONE=0	    # success (no error)
+uint8 ERR_UNKNOWN=1	    # fail (unknown error / general error)

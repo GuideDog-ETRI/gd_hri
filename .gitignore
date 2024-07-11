@@ -16,3 +16,7 @@ src/ros2_gopro/ros2_gopro/__pycache__/__init__.cpython-310.pyc
 src/ros2_gopro/test/__pycache__/test_copyright.cpython-310-pytest-6.2.5.pyc
 src/ros2_gopro/test/__pycache__/test_flake8.cpython-310-pytest-6.2.5.pyc
 src/ros2_gopro/test/__pycache__/test_pep257.cpython-310-pytest-6.2.5.pyc
+build/gdh_node/build/lib/gdh_node/client_member_function_det_all.py
+build/gdh_node/build/lib/gdh_node/client_member_function_init_det.py
+build/gdh_node/build/lib/gdh_node/client_member_function_term_det.py
+build/gdh_node/build/lib/gdh_node/service_member_function.py

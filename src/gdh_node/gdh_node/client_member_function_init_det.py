@@ -1,6 +1,7 @@
 import sys
 
-from gdh_interfaces.srv import GDHInitializeDetectStaticObject
+# from gdh_interfaces.srv import GDHInitializeDetectStaticObject
+from gd_ifc_pkg.srv import GDHInitializeDetectStaticObject
 import rclpy
 from rclpy.node import Node
 

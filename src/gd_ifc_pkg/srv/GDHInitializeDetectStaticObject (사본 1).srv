@@ -1,0 +1,5 @@
+
+---
+uint8 errcode
+uint8 ERR_NONE=0
+uint8 ERR_UNKNOWN=1

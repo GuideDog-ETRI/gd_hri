@@ -1,0 +1,1 @@
+bool harness_grip

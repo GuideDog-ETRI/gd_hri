@@ -1,0 +1,9 @@
+uint8 cam_id	# camera id
+float64 theta	# erp image orientation angle (unit: radian)
+float64 hfov	# erp image horizontal fov angle (unit: radian)
+---
+int32 x		# x pixel coordinate of the current GP
+int32 y		# x pixel coordinate of the current GP
+uint8 errcode 0 # error code
+uint8 ERR_NONE=0			# success (no error)
+uint8 ERR_UNKNOWN=1			# fail (unknown error / general error)

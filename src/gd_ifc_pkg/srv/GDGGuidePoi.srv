@@ -1,0 +1,8 @@
+uint64 map_id       # global identifier of the pre-build map
+uint64 poi_id       # global identifier of the pre-registered POI on the map
+---
+uint8 errcode 0
+uint8 ERR_NONE=0				# success (no error)
+uint8 ERR_UNKNOWN=1			    # fail (unknown error / general error)
+uint8 ERR_INVALID_MAP_ID=2		# fail (invalid map id)
+uint8 ERR_INVALID_POI_ID=3		# fail (invalid poi id)

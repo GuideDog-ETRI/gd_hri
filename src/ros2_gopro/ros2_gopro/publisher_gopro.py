@@ -26,7 +26,7 @@ from ros2_gopro.my_webcam import MyGoProWebcamPlayer
 class GoProPublisher(Node):
 
     def __init__(self):
-        super().__init__('gopro_talker')   # Node name
+        super().__init__('gopro_publisher')   # Node name
         
         # ros
         # print('def ros')

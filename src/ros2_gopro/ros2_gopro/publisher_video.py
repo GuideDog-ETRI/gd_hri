@@ -10,7 +10,7 @@ from cv_bridge import CvBridge, CvBridgeError
 class VideoPublisher(Node):
 
     def __init__(self):
-        super().__init__('video_publisher')   # Node name
+        super().__init__('webcam_publisher')   # Node name
         self.bridge = CvBridge()
         self.cap = cv2.VideoCapture(0)
         self.publisher = self.create_publisher(Image, '/webcam', 10)

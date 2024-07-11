@@ -1,8 +1,12 @@
-from gdh_interfaces.srv import AddThreeInts
-from gdh_interfaces.srv import GDHInitializeDetectStaticObject, GDHTerminateDetectStaticObject
-from gdh_interfaces.srv import GDHDetectStaticObjectAll, GDHDetectStaticTargetObject, GDHDetectStaticObject
-from gdh_interfaces.srv import GDHExplainPathGP, GDHSpeakCodeID
-from gdh_interfaces.msg import GDHDetection2DExt
+# from gdh_interfaces.srv import AddThreeInts
+# from gdh_interfaces.srv import GDHInitializeDetectStaticObject, GDHTerminateDetectStaticObject
+# from gdh_interfaces.srv import GDHDetectStaticObjectAll, GDHDetectStaticTargetObject, GDHDetectStaticObject
+# from gdh_interfaces.srv import GDHExplainPathGP, GDHSpeakCodeID
+# from gdh_interfaces.msg import GDHDetection2DExt
+from gd_ifc_pkg.srv import GDHInitializeDetectStaticObject, GDHTerminateDetectStaticObject
+from gd_ifc_pkg.srv import GDHDetectStaticObjectAll, GDHDetectStaticTargetObject, GDHDetectStaticObject
+from gd_ifc_pkg.srv import GDHExplainPathGP, GDHSpeakCodeID
+from gd_ifc_pkg.msg import GDHDetection2DExt
 
 import rclpy
 from rclpy.node import Node
