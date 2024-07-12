@@ -1,8 +1,3 @@
-result_0.jpg
-result_1.jpg
-result_2.jpg
-street1.jpg
-street2.jpg
 /build/
 /install/
 /log/
@@ -20,3 +15,6 @@ build/gdh_node/build/lib/gdh_node/client_member_function_det_all.py
 build/gdh_node/build/lib/gdh_node/client_member_function_init_det.py
 build/gdh_node/build/lib/gdh_node/client_member_function_term_det.py
 build/gdh_node/build/lib/gdh_node/service_member_function.py
+rosbag/rosbag2_2024_07_11-16_34_43/metadata.yaml
+.gitignore
+rosbag/rosbag2_2024_07_11-16_34_43/rosbag2_2024_07_11-16_34_43_0.db3

@@ -20,17 +20,16 @@ from cv_bridge import CvBridge, CvBridgeError
 from rclpy.qos import QoSProfile, DurabilityPolicy
 
 class GDHService(Node):
-
     def __init__(self):
         super().__init__('gdh_service')     # node_name
 
         qos_profile = QoSProfile(depth=10)
         # topic_name = '/gopro'
-        topic_name = '/webcam'
+        topic_name = '/image_raw'
         self.subscription = self.create_subscription(
             Image,
             topic_name,
-            self.listener_callback_gopro,
+            self.listener_callback_photo,
             qos_profile=qos_profile)
         self.bridge = CvBridge()
         self.subscription  # prevent unused variable warning
@@ -52,9 +51,8 @@ class GDHService(Node):
         self.yolo_conf_threshold = 0.5
 
 
-    def listener_callback_gopro(self, msg):
+    def listener_callback_photo(self, msg):
         self.latest_gopro_image = self.bridge.imgmsg_to_cv2(msg, 'bgr8')    # nparray is returned
-
         self.get_logger().info(f'listener_callback: {self.latest_gopro_image.shape}')
 
         # cv2.imshow('listener', self.latest_gopro_image)
@@ -77,9 +75,9 @@ class GDHService(Node):
 
             for th, hf in zip(theta, hfov):
                 if th < 180:
-                    img = PilImage.open("street1.jpg")
+                    img = PilImage.open("street0.jpg")
                 else:
-                    img = PilImage.open("street2.jpg")
+                    img = PilImage.open("street0.jpg")
                 
                 res_imgs.append(img)
         else:
@@ -90,8 +88,7 @@ class GDHService(Node):
                 ret = False
 
         return ret, res_imgs
-
-
+    
     def init_detector(self, request, response):
         try:
             # Load a model

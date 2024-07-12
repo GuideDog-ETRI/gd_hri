@@ -7,6 +7,9 @@ GDH (GuideDog HRI) module packages
 # 2. 설치
 ## 2.1. 리코세타(ricoh thetaz1)
 
+- 리코세타가 설치되었으면 skip가능
+- 리코세타 설치없이 녹화된 영상을 사용하겠다면 역시 skip가능
+
 2.1.1. 리코세타 연결
 - 리코세타 카메라를 USB에 연결하고, 전원 스위치를 켠다. 모드 버튼을 눌러서 모드를 'LIVE'로 바꾼다.
 
@@ -84,13 +87,19 @@ GDH (GuideDog HRI) module packages
     ```
     ros2 run theta_driver theta_driver_node
     ```
+- 리코세타를 설치하지않고 녹화된 영상을 재생하겠다면, 다음을 실행한다
+    ```
+    cd rosbag
+    ./play.bash
+    ```
 - (A) Run a dummy photo publisher
     ```bash
     conda activate use_gopro
     cd ~/Desktop/gdh
     . install/setup.bash
-    # ros2 run ros2_gopro gopro_talker # current in error
-    ros2 run ros2_gopro webcam_talker # dummy photo publisher
+    # ros2 run ros2_gopro gopro_pub # current in error
+    # ros2 run ros2_gopro webcam_pub # dummy photo publisher
+    ros2 run ros2_gopro photo_pub
     ```
 
 - (B) Run a GDH node
@@ -106,6 +115,10 @@ GDH (GuideDog HRI) module packages
     conda activate use_gopro
     cd ~/Desktop/gdh
     . install/setup.bash
+
+    ros2 run ros2_gopro video_sub /photo    # check dummy photo image
+    ros2 run ros2_gopro video_sub /image_raw    # check ricoh image
+
     ros2 run gdh_node client_det_init
     ros2 run gdh_node client_det_all
     ros2 run gdh_node client_det_term

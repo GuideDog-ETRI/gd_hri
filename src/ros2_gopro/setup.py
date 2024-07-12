@@ -20,10 +20,10 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'gopro_talker = ros2_gopro.publisher_gopro:main',
-            'gopro_listener = ros2_gopro.subscriber_gopro:main',
-            'webcam_talker = ros2_gopro.publisher_video:main',
-            'webcam_listener = ros2_gopro.subscriber_video:main',
+            'gopro_pub = ros2_gopro.publisher_gopro:main',
+            'webcam_pub = ros2_gopro.publisher_video:main',
+            'photo_pub = ros2_gopro.publisher_photo:main',
+            'video_sub = ros2_gopro.subscriber_video:main',
         ],
     },
 )
