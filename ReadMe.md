@@ -87,12 +87,13 @@ GDH (GuideDog HRI) module packages
     ```
     ros2 run theta_driver theta_driver_node
     ```
-- 리코세타를 설치하지않고 녹화된 영상을 재생하겠다면, 다음을 실행한다
+- (A) 이미지를 publish하기위해 (A-1), (A-2)중에 하나를 실행한다.
+- (A-1) 리코세타를 설치하지않고 녹화된 영상을 재생하겠다면, 다음을 실행한다
     ```
     cd rosbag
     ./play.bash
     ```
-- (A) Run a dummy photo publisher
+- (A-2) Run a dummy photo publisher
     ```bash
     conda activate use_gopro
     cd ~/Desktop/gdh
