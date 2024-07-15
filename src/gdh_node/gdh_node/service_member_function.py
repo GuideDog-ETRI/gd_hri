@@ -11,7 +11,9 @@ from gd_ifc_pkg.msg import GDHDetection2DExt
 import rclpy
 from rclpy.node import Node
 
+import os
 from PIL import Image as PilImage
+import py360convert
 import numpy as np
 from ultralytics import YOLO
 from vision_msgs.msg import BoundingBox2D, Pose2D, Point2D
@@ -19,85 +21,111 @@ from sensor_msgs.msg import Image
 from cv_bridge import CvBridge, CvBridgeError
 from rclpy.qos import QoSProfile, DurabilityPolicy
 
+
 class GDHService(Node):
     def __init__(self):
         super().__init__('gdh_service')     # node_name
 
         qos_profile = QoSProfile(depth=10)
-        # topic_name = '/gopro'
-        topic_name = '/image_raw'
+        # self.topic_name = '/gopro'
+        self.topic_name = '/image_raw'
         self.subscription = self.create_subscription(
             Image,
-            topic_name,
+            self.topic_name,
             self.listener_callback_photo,
             qos_profile=qos_profile)
         self.bridge = CvBridge()
         self.subscription  # prevent unused variable warning
-        self.latest_gopro_image = None
+        self.latest_image = None
 
         # service type(in/out params), name, callback func.
-        self.srv_init_detector = self.create_service(GDHInitializeDetectStaticObject, 'GDH_init_detector', self.init_detector)
-        self.srv_term_detector = self.create_service(GDHTerminateDetectStaticObject, 'GDH_term_detector', self.term_detector)
-        self.srv_detect_all = self.create_service(GDHDetectStaticObjectAll, 'GDH_detect_all', self.detect_all)
-        self.srv_detect = self.create_service(GDHDetectStaticObject, 'GDH_detect', self.detect)
-        self.srv_detect_target = self.create_service(GDHDetectStaticTargetObject, 'GDH_detect_target', self.detect_target)
-        self.srv_explain_pathgp = self.create_service(GDHExplainPathGP, 'GDH_explain_path_to_gp', self.explain_path_to_gp)
-        self.srv_speak_codeid = self.create_service(GDHSpeakCodeID, 'GDH_speak_codeid', self.speak_codeid)
+        self.srv_init_detector = self.create_service(GDHInitializeDetectStaticObject, '/GDH_init_detector', self.init_detector)
+        self.srv_term_detector = self.create_service(GDHTerminateDetectStaticObject, '/GDH_term_detector', self.term_detector)
+        self.srv_detect_all = self.create_service(GDHDetectStaticObjectAll, '/GDH_detect_all', self.detect_all)
+        self.srv_detect = self.create_service(GDHDetectStaticObject, '/GDH_detect', self.detect)
+        self.srv_detect_target = self.create_service(GDHDetectStaticTargetObject, '/GDH_detect_target', self.detect_target)
+        self.srv_explain_pathgp = self.create_service(GDHExplainPathGP, '/GDH_explain_path_to_gp', self.explain_path_to_gp)
+        self.srv_speak_codeid = self.create_service(GDHSpeakCodeID, '/GDH_speak_codeid', self.speak_codeid)
 
-        self.theta_all = [90, 270]
-        self.hfov_all = [45, 45]
+        self.theta_list = [-90, 0, 90, 180]  # [-180, 180]
+        self.hfov_list = [90, 90, 90, 90]
+        self.vfov = 70
 
         self.yolo_model = None
         self.yolo_conf_threshold = 0.5
 
 
     def listener_callback_photo(self, msg):
-        self.latest_gopro_image = self.bridge.imgmsg_to_cv2(msg, 'bgr8')    # nparray is returned
-        self.get_logger().info(f'listener_callback: {self.latest_gopro_image.shape}')
+        self.latest_image = self.bridge.imgmsg_to_cv2(msg, 'bgr8')    # nparray is returned
+        self.get_logger().info(f'listener_callback: msg image size {self.latest_image.shape}')
 
-        # cv2.imshow('listener', self.latest_gopro_image)
+        # cv2.imshow('listener', self.latest_image)
         # cv2.waitKey(10)
 
 
-    def get_image(self, cam_type=0, theta=0, hfov=0):
+    def get_image(self, cam_type=0, theta_list=0, hfov_list=90):
         ret = True
         res_imgs = []
 
         print('func get_image is not implemented!')
 
-        if cam_type == 0:
-            # TODO: use omniverse camera
-            if not isinstance(theta, list):
-                theta = [theta]
-        
-            if not isinstance(hfov, list):
-                hfov = [hfov]
+        if self.latest_image is not None:
+            if cam_type == 0:
+                if not isinstance(theta_list, list):
+                    theta_list = [theta_list]
 
-            for th, hf in zip(theta, hfov):
-                if th < 180:
-                    img = PilImage.open("street0.jpg")
-                else:
-                    img = PilImage.open("street0.jpg")
-                
-                res_imgs.append(img)
-        else:
-            # use gopro or webcam
-            if self.latest_gopro_image is not None:
-                res_imgs.append(self.latest_gopro_image)
+                if not isinstance(hfov_list, list):
+                    hfov_list = [hfov_list]
+            
+                ricohz_image = np.copy(self.latest_image)
+
+                for theta, hfov in zip(theta_list, hfov_list):
+                    planar_image = self.convert_to_planar(ricohz_image, u_deg=theta, fov_deg=(hfov, self.vfov))
+                    res_imgs.append(planar_image)
+                    self.get_logger().info(f'listener_callback: planar image size {planar_image.shape}')
             else:
-                ret = False
+                # use gopro or webcam
+                res_imgs.append(np.copy(self.latest_image))
+        else:
+            ret = False
 
         return ret, res_imgs
+
+
+    def convert_to_planar(self, np_image, fov_deg=(90, 70), u_deg=0, v_deg=0, out_hw=(480,640),  mode="bilinear"):
+        '''
+        fov_deg=(90, 70)
+        u_deg=0  # hori axis
+        v_deg=0  # vert axis
+        out_hw=(480,640)
+        mode="bilinear"
+        '''
+        ## Read Image
+        in_h, in_w, _ = np_image.shape
+        (out_h, out_w) = out_hw
+
+        # rescaling
+        ratio_h = 640. / 90.
+        new_w = int(ratio_h * fov_deg[0])
+        out_hw = (out_hw[0], new_w)
+
+        planarImg = py360convert.e2p(np_image, fov_deg=fov_deg, u_deg=u_deg, v_deg=v_deg, out_hw=out_hw, mode=mode)
+        
+        return planarImg
     
+
     def init_detector(self, request, response):
-        try:
-            # Load a model
-            repo = "models/gd_demo/train958/weights/best.pt"
+        # Load a model
+        repo = "models/gd_demo/train958/weights/best.pt"
+
+        if os.path.exists(repo):
             self.yolo_model = YOLO(repo)
             response.errcode = response.ERR_NONE
-        except:
+            self.get_logger().info(f'init_detector: yolo_model is loaded from {repo}.')
+        else:
             self.yolo_model = None
             response.errcode = response.ERR_UNKNOWN
+            self.get_logger().info(f'init_detector: yolo_model is not loaded. Path({repo}) is not exist.')
         
         self.get_logger().info('Incoming request @ init_detector\n\tresponse: %d,  %d(UNKNOWN), %d(NONE)' % (response.errcode, response.ERR_UNKNOWN, response.ERR_NONE))
 
@@ -107,6 +135,8 @@ class GDHService(Node):
     def term_detector(self, request, response):
         if self.yolo_model is not None:
             del self.yolo_model
+            self.yolo_model = None
+            self.get_logger().info('term_detector: yolo_model is unloaded.')
 
         response.errcode = response.ERR_NONE
         
@@ -167,17 +197,21 @@ class GDHService(Node):
         return res_obj_type, res_obj_status
 
 
-    def detect_common(self, list_imgs, response):
+    def detect_common(self, list_imgs, response, list_img_infos):
         # run yolo            
         results = self.yolo_model.predict(source=list_imgs)
         response.detections = []
 
         # Process results list
-        for cam_id, result in enumerate(results):
+        for idx, result in enumerate(results):
             # data = result.boxes.data
             boxes_cls = result.boxes.cls          # n_det
             boxes_conf = result.boxes.conf        # n_det
             boxes_xywh = result.boxes.xywh    # n_det x 4
+
+            cam_id = list_img_infos['cam_id'][idx]
+            theta = int(list_img_infos['theta'][idx])
+            hfov = int(list_img_infos['hfov'][idx])
 
             for i_box in range(len(boxes_cls)):
                 conf = float(boxes_conf[i_box].item())
@@ -190,14 +224,14 @@ class GDHService(Node):
                     box2d = BoundingBox2D(center=Pose2D(position=Point2D(x=box_xywh[0], y=box_xywh[1]), 
                                                         theta=float(0.0)), 
                                             size_x=box_xywh[2], size_y=box_xywh[3])
-                    det_res = GDHDetection2DExt(cam_id=cam_id, theta=float(0.0), hfov=float(0.0), 
+                    det_res = GDHDetection2DExt(cam_id=cam_id, theta=theta, hfov=hfov, 
                                                 obj_type=obj_type, obj_status=obj_status,
                                                 bbox=box2d)
                     # std_msgs/Header header
                     response.detections.append(det_res)
 
             # result.show()  # display to screen
-            result.save(filename=f'result_{cam_id}.jpg')  # save to disk
+            result.save(filename=f'result_{cam_id}_{theta}_{hfov}.jpg')  # save to disk
 
         if len(response.detections) > 0:
             response.errcode = response.ERR_NONE_AND_FIND_SUCCESS
@@ -208,23 +242,26 @@ class GDHService(Node):
 
 
     def detect_target(self, request, response):
-        if self.yolo_model is None:
-            response.errcode = response.ERR_NO_MODEL
-        else:
-            ret_img, list_imgs = self.get_image(1, theta=self.theta_all, hfov=self.hfov_all)
+        target_object_types = request.object_types
 
-            if not ret_img:
+        if self.yolo_model is None:
+            response.errcode = response.ERR_NOT_INIT_MODEL
+        else:
+            ret_img, list_imgs = self.get_image(0, theta_list=self.theta_list, hfov_list=self.hfov_list)
+
+            list_img_infos = {
+                'cam_id': [0] * len(self.theta_list),
+                'theta': self.theta_list,
+                'hfov': self.hfov_list
+            }
+
+            if ret_img is False:
                 response.errcode = response.ERR_NO_IMAGE
             else:
-                response = self.detect_common(list_imgs, response)
+                response = self.detect_common(list_imgs, response, list_img_infos)
 
-                # list_target_object_names = request.object_names
-                # detections_filtered = [item for item in response.detections 
-                #                     if self.yolo_model.names[int(item.obj_type)] in list_target_object_names]
-                
-                list_target_object_types = request.object_types
                 detections_filtered = [item for item in response.detections 
-                                    if int(item.obj_type) in list_target_object_types]
+                                    if int(item.obj_type) in target_object_types]
                 
                 response.detections = detections_filtered
 
@@ -233,7 +270,7 @@ class GDHService(Node):
                 else:
                     response.errcode = response.ERR_NONE_AND_FIND_FAILURE
 
-        self.get_logger().info('Incoming request @ detect_target\n\tresponse: %d,  %d(UNKNOWN), %d(NONE_AND_FAIL), %d(NONE_AND_FIND)' % 
+        self.get_logger().info('Incoming request @ detect_target\n\tresponse: %d,  %d(UNKNOWN), %d(FIND_FAIL), %d(FIND_SUCCESS)' % 
                                (response.errcode, response.ERR_UNKNOWN, response.ERR_NONE_AND_FIND_FAILURE, response.ERR_NONE_AND_FIND_SUCCESS))
 
         return response
@@ -241,17 +278,23 @@ class GDHService(Node):
 
     def detect(self, request, response):
         if self.yolo_model is None:
-            response.errcode = response.NO_MODEL
+            response.errcode = response.ERR_NOT_INIT_MODEL
         else:
-            theta = request.theta
-            hfov = request.hfov
+            theta_list = [request.theta]
+            hfov_list = [request.hfov]
 
-            ret_img, list_imgs = self.get_image(1, theta=[theta], hfov=[hfov])
+            ret_img, list_imgs = self.get_image(0, theta_list=theta_list, hfov_list=hfov_list)
 
-            if not ret_img:
+            list_img_infos = {
+                'cam_id': [0] * len(theta_list),
+                'theta': theta_list,
+                'hfov': hfov_list
+            }
+
+            if ret_img is False:
                 response.errcode = response.NO_IMAGE
             else:
-                response = self.detect_common(list_imgs, response)
+                response = self.detect_common(list_imgs, response, list_img_infos)
               
         self.get_logger().info('Incoming request @ detect\n\tresponse: %d,  %d(UNKNOWN), %d(NONE_AND_FAIL), %d(NONE_AND_FIND)' % 
                                (response.errcode, response.ERR_UNKNOWN, response.ERR_NONE_AND_FIND_FAILURE, response.ERR_NONE_AND_FIND_SUCCESS))
@@ -261,18 +304,27 @@ class GDHService(Node):
 
     def detect_all(self, request, response):
         if self.yolo_model is None:
-            response.errcode = response.NO_MODEL
+            response.errcode = response.ERR_NOT_INIT_MODEL
         else:
-            ret_img0, list_imgs0 = self.get_image(0, theta=self.theta_all, hfov=self.hfov_all)
-            ret_img1, list_imgs1 = self.get_image(1)    # web or gopro
+            ret_img0, list_imgs0 = self.get_image(0, theta_list=self.theta_list, hfov_list=self.hfov_list)  # ricoh
+            # ret_img1, list_imgs1 = self.get_image(1)    # web or gopro
 
-            ret_img = ret_img0 * ret_img1
-            list_imgs = list_imgs0 + list_imgs1
+            # ret_img = ret_img0 * ret_img1
+            # list_imgs = list_imgs0 + list_imgs1
 
-            if not ret_img:
+            ret_img = ret_img0
+            list_imgs = list_imgs0
+
+            list_img_infos = {
+                'cam_id': [0] * len(self.theta_list),
+                'theta': self.theta_list,
+                'hfov': self.hfov_list
+            }
+
+            if ret_img is False:
                 response.errcode = response.NO_IMAGE
             else:
-                response = self.detect_common(list_imgs, response)
+                response = self.detect_common(list_imgs, response, list_img_infos)
               
         self.get_logger().info('Incoming request @ detect_all\n\tresponse: %d,  %d(UNKNOWN), %d(NONE_AND_FAIL), %d(NONE_AND_FIND)' % 
                                (response.errcode, response.ERR_UNKNOWN, response.ERR_NONE_AND_FIND_FAILURE, response.ERR_NONE_AND_FIND_SUCCESS))

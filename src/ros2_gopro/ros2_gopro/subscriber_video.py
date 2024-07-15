@@ -16,6 +16,8 @@ class VideoSubscriber(Node):
         qos = QoSProfile(depth=10)
 
         self.topic_name = str(sys.argv[1])
+        self.hfov = int(sys.argv[2])
+        self.u_deg = int(sys.argv[3])
 
         self.subscription = self.create_subscription(
             Image,
@@ -30,7 +32,7 @@ class VideoSubscriber(Node):
         print('original: ', frame_.shape)
 
         if self.topic_name == '/image_raw':
-            frame = self.convert_to_planar(frame_)
+            frame = self.convert_to_planar(frame_, fov_deg=(self.hfov, 70), u_deg=self.u_deg)
             print('planar: ', frame.shape)
         else:
             frame = frame_
@@ -49,6 +51,11 @@ class VideoSubscriber(Node):
         ## Read Image
         in_h, in_w, _ = np_image.shape
         (out_h, out_w) = out_hw
+
+        # rescaling
+        ratio_h = 640. / 90.
+        new_w = int(ratio_h * fov_deg[0])
+        out_hw = (out_hw[0], new_w)
 
         planarImg = py360convert.e2p(np_image, fov_deg=fov_deg, u_deg=u_deg, v_deg=v_deg, out_hw=out_hw, mode=mode)
         

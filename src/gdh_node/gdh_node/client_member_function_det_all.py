@@ -13,7 +13,7 @@ class MinimalClientAsync(Node):
         super().__init__('minimal_client_async')
 
 
-        self.cli = self.create_client(GDHDetectStaticObjectAll, 'GDH_detect_all')
+        self.cli = self.create_client(GDHDetectStaticObjectAll, '/GDH_detect_all')
         # self.cli = self.create_client(GDHDetectStaticTargetObject, 'GDH_detect_target')
         while not self.cli.wait_for_service(timeout_sec=1.0):
             self.get_logger().info('service not available, waiting again...')
