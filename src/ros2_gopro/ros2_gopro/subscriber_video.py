@@ -3,9 +3,8 @@ import sys
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile
-import py360convert
-
 import cv2
+import py360convert
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge, CvBridgeError
 import pdb
@@ -39,7 +38,7 @@ class VideoSubscriber(Node):
         cv2.imshow('frame', frame)
         cv2.waitKey(10)
 
-    def convert_to_planar(cv_image, fov_deg=(90, 70), u_deg=0, v_deg=0, out_hw=(480,640),  mode="bilinear"):
+    def convert_to_planar(self, np_image, fov_deg=(90, 70), u_deg=0, v_deg=0, out_hw=(480,640),  mode="bilinear"):
         '''
         fov_deg=(90, 70)
         u_deg=0  # hori axis
@@ -48,11 +47,10 @@ class VideoSubscriber(Node):
         mode="bilinear"
         '''
         ## Read Image
-        eqImg = cv_image
-        in_h, in_w, _ = eqImg.shape
+        in_h, in_w, _ = np_image.shape
         (out_h, out_w) = out_hw
 
-        planarImg = py360convert.e2p(eqImg, fov_deg=fov_deg, u_deg=u_deg, v_deg=v_deg, out_hw=out_hw, mode=mode)
+        planarImg = py360convert.e2p(np_image, fov_deg=fov_deg, u_deg=u_deg, v_deg=v_deg, out_hw=out_hw, mode=mode)
         
         return planarImg
 

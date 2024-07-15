@@ -130,3 +130,14 @@ sudo apt-get install ros-humble-sensor-msgs
 sudo apt-get install ros-humble-nav-msgs 
 sudo apt-get install ros-humble-grid-map-msgs ros-humble-vision-msgs
 
+# 4. 오류 처리
+- 만약 no module py360convert가 나온다면,
+    아래 명령어로 현재 수행하는 python path를 확인
+    ```
+    import sys
+    print(sys.executable)
+    ```
+    알맞은 환경에 py360convert를 설치 (/usr/bin/python3가 위에서 출력한 환경이라면)
+    ```
+    /usr/bin/python3 -m pip install py360convert
+    ```
