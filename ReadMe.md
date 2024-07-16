@@ -66,9 +66,9 @@ GDH (GuideDog HRI) module packages
     ```
 
 ## 2.2. GDH packages
-- download GDH packages from [github](https://github.com/GuideDog-ETRI/GDH). Assume it located in ~/Desktop/gdh
+- download GDH packages from [github](https://github.com/GuideDog-ETRI/gd_hri). Assume it located in ~/Desktop/gdh
     ```bash
-    git clone https://github.com/GuideDog-ETRI/GDH
+    git clone https://github.com/GuideDog-ETRI/gd_hri
     ```
 
 - Assume all module is installed in conda env 'use_gopro'
@@ -90,6 +90,7 @@ GDH (GuideDog HRI) module packages
 - (A) 이미지를 publish하기위해 (A-1), (A-2)중에 하나를 실행한다.
 - (A-1) 리코세타를 설치하지않고 녹화된 영상을 재생하겠다면, 다음을 실행한다
     ```
+    wget https://drive.google.com/drive/folders/13Bw_6Nb18YpN9o4n6TegjvI-CkZDSPQa?usp=sharing
     cd rosbag
     ./play.bash
     ```
@@ -103,7 +104,7 @@ GDH (GuideDog HRI) module packages
     ros2 run ros2_gopro photo_pub
     ```
 
-- (B) Run a GDH node
+- (B) Run a GDH node (receiving images and processing HRI functions)
     ```bash
     conda activate use_gopro
     cd ~/Desktop/gdh
@@ -117,20 +118,15 @@ GDH (GuideDog HRI) module packages
     cd ~/Desktop/gdh
     . install/setup.bash
 
-    ros2 run ros2_gopro video_sub /photo    # check dummy photo image
+    ros2 run ros2_gopro video_sub /photo        # check dummy photo image
     ros2 run ros2_gopro video_sub /image_raw    # check ricoh image
 
     ros2 run gdh_node client_det_init
     ros2 run gdh_node client_det_all
     ros2 run gdh_node client_det_term
     ```
+    * Results are saved in the GDH folder.
  
-* if gd_ifc_pkg makes new errors, install belows
-sudo apt-get update
-sudo apt-get install ros-humble-sensor-msgs 
-sudo apt-get install ros-humble-nav-msgs 
-sudo apt-get install ros-humble-grid-map-msgs ros-humble-vision-msgs
-
 # 4. 오류 처리
 - 만약 no module py360convert가 나온다면,
     아래 명령어로 현재 수행하는 python path를 확인
@@ -141,4 +137,12 @@ sudo apt-get install ros-humble-grid-map-msgs ros-humble-vision-msgs
     알맞은 환경에 py360convert를 설치 (/usr/bin/python3가 위에서 출력한 환경이라면)
     ```
     /usr/bin/python3 -m pip install py360convert
+    ```
+
+- if gd_ifc_pkg makes new errors, install belows
+    ```
+    sudo apt-get update
+    sudo apt-get install ros-humble-sensor-msgs 
+    sudo apt-get install ros-humble-nav-msgs 
+    sudo apt-get install ros-humble-grid-map-msgs ros-humble-vision-msgs
     ```
