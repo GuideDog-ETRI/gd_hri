@@ -88,9 +88,8 @@ GDH (GuideDog HRI) module packages
     ros2 run theta_driver theta_driver_node
     ```
 - (A) 이미지를 publish하기위해 (A-1), (A-2)중에 하나를 실행한다.
-- (A-1) 리코세타를 설치하지않고 녹화된 영상을 재생하겠다면, 다음을 실행한다
+- (A-1) 리코세타를 설치하지않고 녹화된 영상을 재생하겠다면, [다음 링크](https://drive.google.com/file/d/18xELEj7PeVmdU_xKqT7OH1pQPjSQ95zT/view?usp=drive_link)에서 파일을 받고 rosbag/rosbag2_2024_07_11-16_34_43 폴더로 복사 후, 다음을 실행한다
     ```
-    wget https://drive.google.com/drive/folders/13Bw_6Nb18YpN9o4n6TegjvI-CkZDSPQa?usp=sharing
     cd rosbag
     ./play.bash
     ```
