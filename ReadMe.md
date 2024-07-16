@@ -2,7 +2,7 @@ GDH (GuideDog HRI) module packages
 ==================================
 
 # 1. 소개
-[GuideDog](https://github.com/GuideDog-ETRI) 과제의 HRI파트 설치 문서이다. 하드웨어 설치, 소프트웨어 설치로 나누어져 있으며, 하드웨어는 리코세타, USB카메라, GPU(옵션)를 필요로 한다.
+[GuideDog](https://github.com/GuideDog-ETRI) 과제의 HRI파트 설치 문서이다. 리코세타 설치 (옵션), GDH package 설치로 나누어져 있다.
 
 # 2. 설치
 ## 2.1. 리코세타(ricoh thetaz1)
