@@ -1,21 +1,25 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>py_srvcli</name>
+  <name>gdh_package</name>
   <version>0.0.0</version>
-  <description>Python client server tutorial</description>
+  <description>GuideDog HRI package</description>
   <maintainer email="yochin47@gmail.com">yochin</maintainer>
   <license>TODO: License declaration</license>
 
   <depend>rclpy</depend>
+  <depend>gd_ifc_pkg</depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
   <test_depend>ament_pep257</test_depend>
   <test_depend>python3-pytest</test_depend>
 
-  <exec_depend>gdh_interfaces</exec_depend>
-
+  <exec_depend>cv2</exec_depend>
+  <exec_depend>my_webcam</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>cv_bridge</exec_depend>
+  
   <export>
     <build_type>ament_python</build_type>
   </export>

@@ -1,7 +1,8 @@
 /build/
 /install/
 /log/
-/models/
+/models/aihub_pwalk
+/models/gd_demo
 src/gdh_interfaces(24.04.19).zip
 src/gdh_node/resource/gdh_node
 src/gdh_node/test/test_copyright.py

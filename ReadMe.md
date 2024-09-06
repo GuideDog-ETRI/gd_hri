@@ -66,9 +66,29 @@ GDH (GuideDog HRI) module packages
     ```
 
 ## 2.2. GDH packages
-- download GDH packages from [github](https://github.com/GuideDog-ETRI/gd_hri). Assume it located in ~/Desktop/gdh
+- Download GDH packages from [github](https://github.com/GuideDog-ETRI/gd_hri). Assume it located in ~/Desktop/gdh
     ```bash
     git clone https://github.com/GuideDog-ETRI/gd_hri
+    ```
+
+- To use TTS of OpenAI
+    ```bash
+    pip install pygame
+    pip install openai
+    ```
+
+- To use STT of [ReturnZero](https://www.rtzr.ai/stt)
+    ```bash
+    # To Download definition (.proto) file
+    wget https://raw.github.com/vito-ai/openapi-grpc/main/protos/vito-stt-client.proto
+
+    # To generate gRPC code
+    pip install grpcio-tools
+    python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. ./vito-stt-client.proto
+
+    # This module requires the dependencies of grpcio and requests.
+    pip install grpcio
+    pip install requests
     ```
 
 - Assume all module is installed in conda env 'use_gopro'
@@ -77,23 +97,24 @@ GDH (GuideDog HRI) module packages
     conda activate use_gopro
     source /opt/ros/humble/setup.bash
     cd ~/Desktop/gdh
-    colcon build --packages-select gd_ifc_pkg ros2_gopro gdh_node --allow-overriding gdh_interfaces
+    colcon build --packages-select gd_ifc_pkg ros2_gopro gdh_package
     ```
 
 # 3. 동작
+## 3.1. GDH 검출기 파트
 - Open three new terminals by Ctrl + Alt + T for (A) dummy photo publisher, (B) GDH node, and (C) toy test client
 
-- 만약 리코세타 노드를 띄우지 않았으면, 아래도 실행한다
-    ```
-    ros2 run theta_driver theta_driver_node
-    ```
-- (A) 이미지를 publish하기위해 (A-1), (A-2)중에 하나를 실행한다.
+- (A) 이미지를 publish하기위해 (A-1), (A-2), (A-3)중에 하나를 실행한다.
 - (A-1) 리코세타를 설치하지않고 녹화된 영상을 재생하겠다면, [다음 링크](https://drive.google.com/file/d/18xELEj7PeVmdU_xKqT7OH1pQPjSQ95zT/view?usp=drive_link)에서 파일을 받고 rosbag/rosbag2_2024_07_11-16_34_43 폴더로 복사 후, 다음을 실행한다
     ```
     cd rosbag
     ./play.bash
     ```
-- (A-2) Run a dummy photo publisher
+- (A-2) 리코세타를 설치했고 리코세타 노드를 띄우지 않았으면 아래를 실행한다 (노드를 띄웠다면 skip).
+    ```
+    ros2 run theta_driver theta_driver_node
+    ```
+- (A-3) Run a dummy photo publisher
     ```bash
     conda activate use_gopro
     cd ~/Desktop/gdh
@@ -108,7 +129,7 @@ GDH (GuideDog HRI) module packages
     conda activate use_gopro
     cd ~/Desktop/gdh
     . install/setup.bash
-    ros2 run gdh_node service
+    ros2 run gdh_package service
     ```
 
 - (C) Run a toy test client
@@ -120,11 +141,52 @@ GDH (GuideDog HRI) module packages
     ros2 run ros2_gopro video_sub /photo        # check dummy photo image
     ros2 run ros2_gopro video_sub /image_raw    # check ricoh image
 
-    ros2 run gdh_node client_det_init
-    ros2 run gdh_node client_det_all
-    ros2 run gdh_node client_det_term
+    ros2 run gdh_package client_det_init
+    ros2 run gdh_package client_det_all
+    ros2 run gdh_package client_det_term
     ```
     * Results are saved in the GDH folder.
+
+## 3.2. STT/TTS 파트
+- Open three new terminals for GDH node, toy client for sending speech codes, toy server for receiving command id.
+- (A) Run GDH node
+    ```bash
+    conda activate use_gopro
+    cd ~/Desktop/gdh
+    . install/setup.bash
+    ros2 run gdh_package service
+    ```
+
+- (B) Run a toy server for receiving voice command ID
+    ```bash
+    conda activate use_gopro
+    cd ~/Desktop/gdh
+    . install/setup.bash
+    ros2 run gdh_package server_toy_gd_others
+    ```
+
+- (C) Run a toy client for sending speech codes
+    ```bash
+    conda activate use_gopro
+    cd ~/Desktop/gdh
+    . install/setup.bash
+    ros2 run gdh_package client_code_send
+    ```
+
+## 3.3. GDH Heartbeat status
+- (A) Run GDH node
+    ```bash
+    conda activate use_gopro
+    cd ~/Desktop/gdh
+    . install/setup.bash
+    ros2 run gdh_package service
+    ```
+
+- (B) Echo status
+    ```
+    ros2 topic list
+    ros2 topic echo /GDH_status
+    ```
  
 # 4. 오류 처리
 - 만약 no module py360convert가 나온다면,
@@ -144,4 +206,10 @@ GDH (GuideDog HRI) module packages
     sudo apt-get install ros-humble-sensor-msgs 
     sudo apt-get install ros-humble-nav-msgs 
     sudo apt-get install ros-humble-grid-map-msgs ros-humble-vision-msgs
+    ```
+
+- pyaudio 설치시 에러
+    ```
+    sudo apt install portaudio19-dev
+    pip3 install pyaudio
     ```

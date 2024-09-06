@@ -1,9 +1,0 @@
-string[] object_name
----
-std_msgs/Header header
-GDHDetection2DExt[] detections
-uint8 errcode
-uint8 ERR_NONE=0
-uint8 ERR_UNKNOWN=1
-uint8 ERR_NOT_INIT_MODEL=3
-uint8 ERR_NO_IMAGE=4

@@ -1,25 +1,111 @@
-# from gdh_interfaces.srv import AddThreeInts
-# from gdh_interfaces.srv import GDHInitializeDetectStaticObject, GDHTerminateDetectStaticObject
-# from gdh_interfaces.srv import GDHDetectStaticObjectAll, GDHDetectStaticTargetObject, GDHDetectStaticObject
-# from gdh_interfaces.srv import GDHExplainPathGP, GDHSpeakCodeID
-# from gdh_interfaces.msg import GDHDetection2DExt
 from gd_ifc_pkg.srv import GDHInitializeDetectStaticObject, GDHTerminateDetectStaticObject
 from gd_ifc_pkg.srv import GDHDetectStaticObjectAll, GDHDetectStaticTargetObject, GDHDetectStaticObject
-from gd_ifc_pkg.srv import GDHExplainPathGP, GDHSpeakCodeID
+from gd_ifc_pkg.srv import GDHExplainPathGP
 from gd_ifc_pkg.msg import GDHDetection2DExt
+from gd_ifc_pkg.srv import GDHSpeakCodeID
+from gd_ifc_pkg.srv import GDGGuideAssist
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, DurabilityPolicy
 
 import os
 from PIL import Image as PilImage
-import py360convert
 import numpy as np
+
+# Ricoh Theta Z
+import py360convert
+
+# Yolo and detector
 from ultralytics import YOLO
 from vision_msgs.msg import BoundingBox2D, Pose2D, Point2D
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge, CvBridgeError
-from rclpy.qos import QoSProfile, DurabilityPolicy
+
+# TTS
+from openai import OpenAI
+from pathlib import Path
+import pygame
+
+# STT
+import grpc
+import time
+import traceback
+from io import DEFAULT_BUFFER_SIZE
+import pyaudio
+import gdh_package.vito_stt_client_pb2 as pb
+import gdh_package.vito_stt_client_pb2_grpc as pb_grpc
+from requests import Session
+
+# Heartbeat
+from gd_ifc_pkg.msg import GDHStatus
+from std_msgs.msg import Header
+from rclpy.clock import Clock
+
+# TTS
+os.environ["OPENAI_API_KEY"] = "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"  # OpenAI API for GDH ROS
+
+# STT
+STT_API_BASE = "https://openapi.vito.ai"
+STT_GRPC_SERVER_URL = "grpc-openapi.vito.ai:443"
+STT_CLIENT_ID = "c6BLbHh67Jwu09pZmaNR"
+STT_CLIENT_SECRET = "Kc41fr7IKwBEaQt_Jk0I21ENnN-vjU0kd7Eo67Vz"  # Key for STT
+STT_SAMPLE_RATE = 8000
+STT_ENCODING = pb.DecoderConfig.AudioEncoding.LINEAR16
+
+class SpeechToTextClient:
+    def __init__(self, client_id, client_secret):
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self._sess = Session()
+        self._token = None
+
+    @property
+    def token(self):
+        if self._token is None or self._token["expire_at"] < time.time():
+            resp = self._sess.post(
+                STT_API_BASE + "/v1/authenticate",
+                data={"client_id": self.client_id, "client_secret": self.client_secret},
+            )
+            resp.raise_for_status()
+            self._token = resp.json()
+        return self._token["access_token"]
+
+    def transcribe_streaming_grpc(self, config):
+        audio = pyaudio.PyAudio()
+        stream = audio.open(format=pyaudio.paInt16,
+                            channels=1,
+                            rate=STT_SAMPLE_RATE,
+                            input=True,
+                            frames_per_buffer=DEFAULT_BUFFER_SIZE)
+        try:
+            with grpc.secure_channel(STT_GRPC_SERVER_URL, credentials=grpc.ssl_channel_credentials()) as channel:
+                stub = pb_grpc.OnlineDecoderStub(channel)
+                cred = grpc.access_token_call_credentials(self.token)
+
+                def req_iterator(audio_stream):
+                    yield pb.DecoderRequest(streaming_config=config)
+                    while True:
+                        buff = audio_stream.read(DEFAULT_BUFFER_SIZE)
+                        if len(buff) == 0:
+                            break
+                        yield pb.DecoderRequest(audio_content=buff)
+
+                print("Start speaking...")
+                req_iter = req_iterator(stream)
+                resp_iter = stub.Decode(req_iter, credentials=cred)
+
+                for resp in resp_iter:
+                    for res in resp.results:
+                        if res.is_final:  # final speech recognition result, EPD
+                            stt_res = res.alternatives[0].text
+                            print("[stt] res: {}".format(stt_res))
+                            return stt_res
+        finally:
+            stream.stop_stream()
+            stream.close()
+            audio.terminate()
+
 
 
 class GDHService(Node):
@@ -46,7 +132,7 @@ class GDHService(Node):
         self.srv_detect_target = self.create_service(GDHDetectStaticTargetObject, '/GDH_detect_target', self.detect_target)
         self.srv_explain_pathgp = self.create_service(GDHExplainPathGP, '/GDH_explain_path_to_gp', self.explain_path_to_gp)
         self.srv_speak_codeid = self.create_service(GDHSpeakCodeID, '/GDH_speak_codeid', self.speak_codeid)
-
+        
         self.theta_list = [-90, 0, 90, 180]  # [-180, 180]
         self.hfov_list = [90, 90, 90, 90]
         self.vfov = 70
@@ -54,7 +140,159 @@ class GDHService(Node):
         self.yolo_model = None
         self.yolo_conf_threshold = 0.5
 
+        # speak code id and TTS
+        self.speech_audio_path = Path("models/GDH_speak_codeid_output.mp3")        
+        self.client_openai = OpenAI()
+        self.code_sentence_map = self.load_code_sentence_table('models/code_sentence_table.txt') 
 
+        # # STT
+        # self.cli_guide_assist = self.create_client(GDGGuideAssist, '/gdg_guide_assist')
+
+        # while not self.cli_guide_assist.wait_for_service(timeout_sec=1.0):
+        #     self.get_logger().info('GDGGuideAssist service not available, waiting again...')
+
+        # self.stt_req = GDGGuideAssist.Request()
+        # self.commands = self.load_commands('models/audio_cmd_list.txt')
+        # self.stt_client = SpeechToTextClient(STT_CLIENT_ID, STT_CLIENT_SECRET)
+        # self.config = pb.DecoderConfig(
+        #     sample_rate=STT_SAMPLE_RATE,
+        #     encoding=STT_ENCODING,
+        #     use_itn=True,
+        #     use_disfluency_filter=False,
+        #     use_profanity_filter=False,
+        # )
+        # self.send_request()
+
+        # heartbeat status
+        self.publisher_status = self.create_publisher(GDHStatus, '/GDH_status', 1)
+        self.timer = self.create_timer(timer_period_sec=1.0, callback=self.timer_callback)
+
+    # Heartbeat
+    def timer_callback(self):
+        header = Header()
+        header.stamp = Clock().now().to_msg()  # 현재 시간
+        header.frame_id = "gdh_idle"
+
+        # Heartbeat 메시지 생성
+        status_msg = GDHStatus()
+        status_msg.header = header
+        status_msg.errcode = 0  # 오류 없음
+
+        self.publisher_status.publish(status_msg)
+        self.get_logger().info(f"Publishing GDH status: timestamp={status_msg.header.stamp.sec}, errcode={status_msg.errcode}")
+
+
+    # STT
+    def load_commands(self, path):
+        with open(path, 'r') as file:
+            cmd_list = [line.strip() for line in file.readlines()]
+            self.get_logger().info(f'Loaded command list from {path}: {cmd_list}')
+            
+            return cmd_list
+
+    def send_request(self):
+        while rclpy.ok():       # if connected to STT server
+            try:
+                self.stt_req.cmd = 255
+                self.stt_req.type = 255
+
+                stt_result = self.stt_client.transcribe_streaming_grpc(self.config)
+
+                import pdb
+                pdb.set_trace()
+
+                if stt_result in self.commands:
+                    if stt_result == '가':
+                        self.stt_req.cmd = self.stt_req.GO_FORWARD
+                    elif '찾아' in stt_result:
+                        self.stt_req.cmd = self.stt_req.GOTO_OBJECT
+
+                        if '문' in stt_result:
+                            self.stt_req.type = self.stt_req.DOOR
+                        elif '엘리베이터' in stt_result:
+                            self.stt_req.type = self.stt_req.ELEVATOR_DOOR
+                        elif '계단' in stt_result:
+                            self.stt_req.type = self.stt_req.STAIRS
+                        elif '에스컬레이터' in stt_result:
+                            self.stt_req.type = self.stt_req.ESCALATOR
+                        elif '횡단보도' in stt_result:
+                            self.stt_req.type = self.stt_req.CROSSWALK
+                        elif '지하철입구' in stt_result:
+                            self.stt_req.type = self.stt_req.SUBWAY_GATE
+                        elif '지하철게이트' in stt_result:
+                            self.stt_req.type = self.stt_req.SUBWAY_TICKET_GATE
+                        elif '스크린도어' in stt_result:
+                            self.stt_req.type = self.stt_req.SUBWAY_SCREEN_DOOR
+
+                    self.future = self.cli.call_async(self.req)
+                    
+                    while rclpy.ok():
+                        rclpy.spin_once(self)
+                        if self.future.done():
+                            try:
+                                response = self.future.result()
+                            except Exception as e:
+                                self.get_logger().info(f'Service call failed: {e}')
+                            else:
+                                if response.success:
+                                    self.get_logger().info(f'Received response: {response.message}')
+                                else:
+                                    self.get_logger().info(f'No matching command found.')
+                            break
+                else:
+                    self.get_logger().info(f'No matched command for: {stt_result}')
+            except grpc.RpcError as e:
+                self.get_logger().error(f'gRPC error: {e}')
+            except Exception as e:
+                self.get_logger().error(f'Error during STT processing: {e}')
+                self.get_logger().error(traceback.format_exc())
+
+    # TTS
+    def play_audio(self, filepath):
+        pygame.mixer.init()
+        pygame.mixer.music.load(filepath)
+        pygame.mixer.music.play()
+        while pygame.mixer.music.get_busy():
+            continue
+
+    def generate_speech(self, input_msg, model="tts-1", voice="alloy"):
+        response = self.client_openai.audio.speech.create(
+            model=model,
+            voice=voice,
+            input=input_msg,
+        )
+        response.stream_to_file(str(self.speech_audio_path))
+        self.play_audio(self.speech_audio_path)
+
+
+    def speak_codeid(self, request, response):
+        self.get_logger().info('Generating speech...')
+        
+        code = request.code_id
+        input_msg = self.code_sentence_map.get(code, None)
+
+        if input_msg is None:
+            response.errcode = response.ERR_UNKNOWN
+        else:
+            self.generate_speech(input_msg)
+            response.errcode = response.ERR_NONE
+            
+        self.get_logger().info('Incoming request @ speak_codeid\n\tresponse: %d' % (response.errcode))
+        self.get_logger().info(f'\tcode_id: {code}, input_msg: {input_msg}')
+        
+        return response
+
+
+    def load_code_sentence_table(self, file_path):
+        code_sentence_map = {}
+        with open(file_path, 'r', encoding='utf-8') as file:
+            for line in file:
+                if ': ' in line:
+                    code, sentence = line.strip().split(': ', 1)
+                    code_sentence_map[int(code)] = sentence
+        return code_sentence_map
+
+    # image
     def listener_callback_photo(self, msg):
         self.latest_image = self.bridge.imgmsg_to_cv2(msg, 'bgr8')    # nparray is returned
         self.get_logger().info(f'listener_callback: msg image size {self.latest_image.shape}')
@@ -340,14 +578,6 @@ class GDHService(Node):
 
         return response
 
-
-    def speak_codeid(self, request, response):
-        self.get_logger().info('TODO: not implemented\n')
-        self.get_logger().info('Incoming request @ speak_codeid\n\tresponse: %d' % (response.errcode))
-
-        response.errcode = response.ERR_UNKNOWN
-        
-        return response
 
 
 def main(args=None):
