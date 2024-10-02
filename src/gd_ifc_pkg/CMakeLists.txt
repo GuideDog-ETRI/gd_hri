@@ -46,6 +46,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/GdmMsg2.msg"
   "msg/GdqMsg1.msg"
   "msg/GdqMsg2.msg"
+  "msg/UserCommand.msg"
   "srv/GDGGetCourseList.srv"
   "srv/GDGGetPoiList.srv"
   "srv/GDGGuideCourse.srv"

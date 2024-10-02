@@ -13,3 +13,4 @@ GDQHarnessGrip.msg
 GDQInitialization.msg
 GDQRobotMode.msg
 GDQStatus.msg
+UserCommand.msg

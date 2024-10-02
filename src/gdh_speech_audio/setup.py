@@ -2,7 +2,7 @@ from setuptools import find_packages, setup
 import os
 from glob import glob
 
-package_name = 'gdh_package'
+package_name = 'gdh_speech_audio'
 
 setup(
     name=package_name,
@@ -12,7 +12,7 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
-        (os.path.join('share', package_name, 'launch'), glob('launch/*.py')),
+        # (os.path.join('share', package_name, 'launch'), glob('launch/*.py')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -23,12 +23,8 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            # 'service = gdh_package.service_member_function:main',
-            'client_det_init = gdh_package.client_member_function_init_det:main',
-            'client_det_term = gdh_package.client_member_function_term_det:main',
-            'client_det_all = gdh_package.client_member_function_det_all:main',
-            'client_code_send = gdh_package.client_code_send:main',
-            'server_toy_gd_others = gdh_package.server_toyGDOthers:main'
+            'pub_command_from_speech = gdh_speech_audio.speech_to_cmd:main',
+            'srv_play_audio_from_msg = gdh_speech_audio.msg_to_audio:main',
         ],
     },
 )

@@ -97,7 +97,7 @@ GDH (GuideDog HRI) module packages
     conda activate use_gopro
     source /opt/ros/humble/setup.bash
     cd ~/Desktop/gdh
-    colcon build --packages-select gd_ifc_pkg ros2_gopro gdh_package
+    colcon build --packages-select gd_ifc_pkg ros2_gopro gdh_package gdh_speech_audio
     ```
 
 # 3. 동작
@@ -154,15 +154,21 @@ GDH (GuideDog HRI) module packages
     conda activate use_gopro
     cd ~/Desktop/gdh
     . install/setup.bash
-    ros2 run gdh_package service
+    ros2 run gdh_speech_audio srv_play_audio_from_msg
+    ros2 run gdh_speech_audio pub_command_from_speech
     ```
 
-- (B) Run a toy server for receiving voice command ID
+<!-- - (B) Run a toy server for receiving voice command ID
     ```bash
     conda activate use_gopro
     cd ~/Desktop/gdh
     . install/setup.bash
     ros2 run gdh_package server_toy_gd_others
+    ``` -->
+- (B) Echo messages from voice command
+    ```
+    ros2 topic list
+    ros2 topic echo /GDH_user_cmd
     ```
 
 - (C) Run a toy client for sending speech codes
@@ -212,4 +218,15 @@ GDH (GuideDog HRI) module packages
     ```
     sudo apt install portaudio19-dev
     pip3 install pyaudio
+    ```
+
+- 사운드 카드 미인식 혹은 설정 오류
+    ```
+    ALSA lib confmisc.c:855:(parse_card) cannot find card '0'
+ALSA lib conf.c:5178:(_snd_config_evaluate) function snd_func_card_inum returned error: No such file or directory
+    ```
+    리눅스 시스템에 로그인 필요
+    아래 명령으로 사운드카드 인식상태 확인
+    ```
+    aplay -l
     ```

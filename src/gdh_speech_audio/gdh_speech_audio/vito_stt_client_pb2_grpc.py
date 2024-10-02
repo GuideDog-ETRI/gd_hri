@@ -4,7 +4,7 @@ import grpc
 import warnings
 
 # import vito_stt_client_pb2 as vito__stt__client__pb2
-import gdh_package.vito_stt_client_pb2 as vito__stt__client__pb2
+import gdh_speech_audio.vito_stt_client_pb2 as vito__stt__client__pb2
 
 GRPC_GENERATED_VERSION = '1.66.1'
 GRPC_VERSION = grpc.__version__
