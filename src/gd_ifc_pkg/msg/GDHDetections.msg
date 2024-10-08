@@ -1,5 +1,3 @@
-
----
 std_msgs/Header header
 GDHDetection2DExt[] detections
 uint8 errcode
