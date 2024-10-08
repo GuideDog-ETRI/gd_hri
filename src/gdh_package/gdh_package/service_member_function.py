@@ -1,7 +1,8 @@
 from gd_ifc_pkg.srv import GDHInitializeDetectStaticObject, GDHTerminateDetectStaticObject
-from gd_ifc_pkg.srv import GDHDetectStaticObjectAll, GDHDetectStaticTargetObject, GDHDetectStaticObject
+from gd_ifc_pkg.srv import GDHDetectStaticObjectAll, GDHDetectStaticObject
+from gd_ifc_pkg.srv import GDHStartDetectObject, GDHStopDetectObject
 from gd_ifc_pkg.srv import GDHExplainPathGP
-from gd_ifc_pkg.msg import GDHDetection2DExt
+from gd_ifc_pkg.msg import GDHDetection2DExt, GDHDetections
 
 import rclpy
 from rclpy.node import Node
@@ -19,6 +20,8 @@ from ultralytics import YOLO
 from vision_msgs.msg import BoundingBox2D, Pose2D, Point2D
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge, CvBridgeError
+import cv2
+import threading
 
 # # TTS
 # from openai import OpenAI
@@ -111,33 +114,53 @@ class GDHService(Node):
     def __init__(self):
         super().__init__('gdh_service')     # node_name
 
-        qos_profile = QoSProfile(depth=10)
-        # self.topic_name = '/gopro'
+        # subscription of ricoh image
+        qos_profile = QoSProfile(depth=10)        
         self.topic_name = '/image_raw'
         self.subscription = self.create_subscription(
             Image,
             self.topic_name,
-            self.listener_callback_photo,
+            self.listener_callback_ricoh,
             qos_profile=qos_profile)
         self.bridge = CvBridge()
         self.subscription  # prevent unused variable warning
-        self.latest_image = None
+        self.latest_ricoh_erp_image = None
+
+        # TODO: subscription of gopro
+        # self.topic_name = '/gopro'
 
         # service type(in/out params), name, callback func.
         self.srv_init_detector = self.create_service(GDHInitializeDetectStaticObject, '/GDH_init_detector', self.init_detector)
         self.srv_term_detector = self.create_service(GDHTerminateDetectStaticObject, '/GDH_term_detector', self.term_detector)
-        self.srv_detect_all = self.create_service(GDHDetectStaticObjectAll, '/GDH_detect_all', self.detect_all)
-        self.srv_detect = self.create_service(GDHDetectStaticObject, '/GDH_detect', self.detect)
-        self.srv_detect_target = self.create_service(GDHDetectStaticTargetObject, '/GDH_detect_target', self.detect_target)
+
+        # self.srv_detect_all = self.create_service(GDHDetectStaticObjectAll, '/GDH_detect_all', self.detect_all)
+        # self.srv_detect = self.create_service(GDHDetectStaticObject, '/GDH_detect', self.detect)
+
         self.srv_explain_pathgp = self.create_service(GDHExplainPathGP, '/GDH_explain_path_to_gp', self.explain_path_to_gp)
         # self.srv_speak_codeid = self.create_service(GDHSpeakCodeID, '/GDH_speak_codeid', self.speak_codeid)
         
-        self.theta_list = [-90, 0, 90, 180]  # [-180, 180]
-        self.hfov_list = [90, 90, 90, 90]
+        self.srv_start_detect_target = self.create_service(GDHStartDetectObject, '/GDH_start_detect', self.start_detect_callback)
+        self.srv_stop_detect_target = self.create_service(GDHStopDetectObject, '/GDH_stop_detect', self.stop_detect_callback)
+        self.publisher_detect = self.create_publisher(GDHDetections, '/GDH_detections', 10)
+        self.publisher_detect_img = self.create_publisher(Image, '/GDH_detections_img', 10)
+        self.detecting = False
+        self.thread = None
+        
+        self.htheta_list = [-90, 0, 90, 180]  # [-180, 180] in degree
+        self.vtheta_list = [90, 90, 90, 90]     
+        self.hfov = 90
         self.vfov = 70
+        
+        self.detect_object_types = -1       # -1 means all object_types
 
         self.yolo_model = None
         self.yolo_conf_threshold = 0.5
+
+        self.cam_id_ricoh = 'theta_cart'
+
+        # self.index_to_cam_id = {
+        #     0: 'theta_cart'
+        # }
 
         # # speak code id and TTS
         # self.speech_audio_path = Path("models/GDH_speak_codeid_output.mp3")        
@@ -166,16 +189,22 @@ class GDHService(Node):
         self.publisher_status = self.create_publisher(GDHStatus, '/GDH_status', 1)
         self.timer = self.create_timer(timer_period_sec=1.0, callback=self.timer_callback)
 
+    def __del__(self):
+        self._term_detector()
+
     # Heartbeat
     def timer_callback(self):
         header = Header()
         header.stamp = Clock().now().to_msg()  # 현재 시간
-        header.frame_id = "gdh_idle"
+        header.frame_id = "gdh_status"
 
         # Heartbeat 메시지 생성
         status_msg = GDHStatus()
         status_msg.header = header
-        status_msg.errcode = 0  # 오류 없음
+
+
+        status_msg.errcode = self.heartbeats_errcode
+        self.heartbeats_errcode = status_msg.ERR_NONE  # 오류 없음
 
         self.publisher_status.publish(status_msg)
         self.get_logger().info(f"Publishing GDH status: timestamp={status_msg.header.stamp.sec}, errcode={status_msg.errcode}")
@@ -292,44 +321,67 @@ class GDHService(Node):
     #     return code_sentence_map
 
     # image
-    def listener_callback_photo(self, msg):
-        self.latest_image = self.bridge.imgmsg_to_cv2(msg, 'bgr8')    # nparray is returned
-        self.get_logger().info(f'listener_callback: msg image size {self.latest_image.shape}')
+    def listener_callback_ricoh(self, msg):
+        self.latest_ricoh_erp_image = self.bridge.imgmsg_to_cv2(msg, 'bgr8')    # nparray is returned
+        self.get_logger().info(f'listener_callback: msg latest_ricoh_erp_image size {self.latest_ricoh_erp_image.shape}')
 
         # cv2.imshow('listener', self.latest_image)
         # cv2.waitKey(10)
 
+    # def get_image(self, cam_id=None, theta_list=0, hfov_list=90):
+    #     ret = True
+    #     res_imgs = []
 
-    def get_image(self, cam_type=0, theta_list=0, hfov_list=90):
-        ret = True
+    #     print('func get_image is not implemented!')
+
+    #     if self.latest_image is not None:
+    #         if cam_type == 0:
+    #             if not isinstance(theta_list, list):
+    #                 theta_list = [theta_list]
+
+    #             if not isinstance(hfov_list, list):
+    #                 hfov_list = [hfov_list]
+            
+    #             ricohz_image = np.copy(self.latest_image)
+
+    #             for theta, hfov in zip(theta_list, hfov_list):
+    #                 planar_image = self.convert_to_planar(ricohz_image, u_deg=theta, fov_deg=(hfov, self.vfov))
+    #                 res_imgs.append(planar_image)
+    #                 self.get_logger().info(f'listener_callback: planar image size {planar_image.shape}')
+    #         else:
+    #             # use gopro or webcam
+    #             res_imgs.append(np.copy(self.latest_image))
+    #     else:
+    #         ret = False
+
+    #     return ret, res_imgs
+
+    def get_rectified_ricoh_images(self, htheta_list, vtheta_list, hfov, vfov):        
         res_imgs = []
 
-        print('func get_image is not implemented!')
+        if self.latest_ricoh_erp_image is not None:
+            if not isinstance(htheta_list, list):
+                htheta_list = [htheta_list]
 
-        if self.latest_image is not None:
-            if cam_type == 0:
-                if not isinstance(theta_list, list):
-                    theta_list = [theta_list]
+            if not isinstance(vtheta_list, list):
+                vtheta_list = [vtheta_list]
+        
+            ricohz_erp_image = np.copy(self.latest_ricoh_erp_image)
 
-                if not isinstance(hfov_list, list):
-                    hfov_list = [hfov_list]
-            
-                ricohz_image = np.copy(self.latest_image)
+            for htheta, vtheta in zip(htheta_list, vtheta_list):
+                planar_image = self.convert_to_planar(ricohz_erp_image, fov_deg=(hfov, vfov), 
+                                                      u_deg=htheta, v_deg=vtheta)
+                res_imgs.append(planar_image)
+                self.get_logger().info(f'listener_callback: rectified erp image size {planar_image.shape}')
 
-                for theta, hfov in zip(theta_list, hfov_list):
-                    planar_image = self.convert_to_planar(ricohz_image, u_deg=theta, fov_deg=(hfov, self.vfov))
-                    res_imgs.append(planar_image)
-                    self.get_logger().info(f'listener_callback: planar image size {planar_image.shape}')
-            else:
-                # use gopro or webcam
-                res_imgs.append(np.copy(self.latest_image))
+            res = True
         else:
-            ret = False
+            res = False
 
-        return ret, res_imgs
+        return res, res_imgs
+    
 
-
-    def convert_to_planar(self, np_image, fov_deg=(90, 70), u_deg=0, v_deg=0, out_hw=(480,640),  mode="bilinear"):
+    def convert_to_planar(self, np_image, fov_deg=(90, 70), u_deg=0, v_deg=0, out_hw=(480, 640),  mode="bilinear"):
         '''
         fov_deg=(90, 70)
         u_deg=0  # hori axis
@@ -350,30 +402,73 @@ class GDHService(Node):
         
         return planarImg
     
+    # Combine PIL images into one
+    def combine_pil_images(self, pil_images):
+        # Calculate total width and max height for the combined image
+        total_width = sum(image.size[0] for image in pil_images)
+        max_height = max(image.size[1] for image in pil_images)
+        
+        # Create a new blank image with the calculated dimensions
+        combined_image = Image.new('RGB', (total_width, max_height))
+        
+        # Paste each image into the new image
+        x_offset = 0
+        for img in pil_images:
+            combined_image.paste(img, (x_offset, 0))
+            x_offset += img.size[0]
+        
+        return combined_image
 
-    def init_detector(self, request, response):
+    # Convert PIL image to ROS2 Image message
+    def pil_to_ros_image(self, pil_image):
+        # Convert PIL image to OpenCV format
+        open_cv_image = np.array(pil_image)
+        open_cv_image = cv2.cvtColor(open_cv_image, cv2.COLOR_RGB2BGR)
+        
+        # Use CvBridge to convert OpenCV image to ROS Image
+        bridge = CvBridge()
+        ros_image = bridge.cv2_to_imgmsg(open_cv_image, encoding="bgr8")
+        
+        return ros_image
+
+    def _init_detector(self):
         # Load a model
         repo = "models/gd_demo/train958/weights/best.pt"
 
         if os.path.exists(repo):
             self.yolo_model = YOLO(repo)
-            response.errcode = response.ERR_NONE
+            res = True
             self.get_logger().info(f'init_detector: yolo_model is loaded from {repo}.')
         else:
             self.yolo_model = None
-            response.errcode = response.ERR_UNKNOWN
+            res = False
             self.get_logger().info(f'init_detector: yolo_model is not loaded. Path({repo}) is not exist.')
+
+        return res
+
+
+    def init_detector(self, request, response):
+        res = self._init_detector()
+
+        if res:
+            response.errcode = response.ERR_NONE
+        else:
+            response.errcode = response.ERR_UNKNOWN
         
         self.get_logger().info('Incoming request @ init_detector\n\tresponse: %d,  %d(UNKNOWN), %d(NONE)' % (response.errcode, response.ERR_UNKNOWN, response.ERR_NONE))
 
         return response
     
-
-    def term_detector(self, request, response):
+    def _term_detector(self):
         if self.yolo_model is not None:
             del self.yolo_model
             self.yolo_model = None
             self.get_logger().info('term_detector: yolo_model is unloaded.')
+
+        return True
+
+    def term_detector(self, request, response):
+        res = self._term_detector()
 
         response.errcode = response.ERR_NONE
         
@@ -433,11 +528,19 @@ class GDHService(Node):
 
         return res_obj_type, res_obj_status
 
+    def detect_common(self, list_imgs, list_img_infos):
+        # dets_msg
+        dets_msg = GDHDetections()
+        dets_img = []
 
-    def detect_common(self, list_imgs, response, list_img_infos):
+        header = Header()
+        header.stamp = Clock().now().to_msg()  # 현재 시간
+        header.frame_id = "none"
+        dets_msg.header = header
+        dets_msg.detections = []
+
         # run yolo            
         results = self.yolo_model.predict(source=list_imgs)
-        response.detections = []
 
         # Process results list
         for idx, result in enumerate(results):
@@ -446,9 +549,15 @@ class GDHService(Node):
             boxes_conf = result.boxes.conf        # n_det
             boxes_xywh = result.boxes.xywh    # n_det x 4
 
-            cam_id = list_img_infos['cam_id'][idx]
-            theta = int(list_img_infos['theta'][idx])
-            hfov = int(list_img_infos['hfov'][idx])
+            # parsing result
+            cam_id = list_img_infos[idx]['cam_id']
+            img_w = list_img_infos[idx]['img_w']
+            img_h = list_img_infos[idx]['img_h']
+            htheta = list_img_infos[idx]['htheta']
+            vtheta = list_img_infos[idx]['vtheta']
+            hfov = list_img_infos[idx]['hfov']
+            vfov = list_img_infos[idx]['vfov']
+
 
             for i_box in range(len(boxes_cls)):
                 conf = float(boxes_conf[i_box].item())
@@ -461,112 +570,199 @@ class GDHService(Node):
                     box2d = BoundingBox2D(center=Pose2D(position=Point2D(x=box_xywh[0], y=box_xywh[1]), 
                                                         theta=float(0.0)), 
                                             size_x=box_xywh[2], size_y=box_xywh[3])
-                    det_res = GDHDetection2DExt(cam_id=cam_id, theta=theta, hfov=hfov, 
+                    det_res = GDHDetection2DExt(header=header, bbox=box2d, 
                                                 obj_type=obj_type, obj_status=obj_status,
-                                                bbox=box2d)
+                                                cam_id=cam_id, img_w=img_w, img_h=img_h, 
+                                                htheta=htheta, vtheta=vtheta, hfov=hfov, vfov=vfov
+                                                )
                     # std_msgs/Header header
-                    response.detections.append(det_res)
+                    dets_msg.detections.append(det_res)
 
             # result.show()  # display to screen
-            result.save(filename=f'result_{cam_id}_{theta}_{hfov}.jpg')  # save to disk
+            # result.save(filename=f'result_{cam_id}_{htheta}_{hfov}.jpg')  # save to disk
+            dets_img.append(result)
 
-        if len(response.detections) > 0:
-            response.errcode = response.ERR_NONE_AND_FIND_SUCCESS
+        if len(dets_msg.detections) > 0:
+            dets_msg.errcode = dets_msg.ERR_NONE_AND_FIND_SUCCESS
         else:
-            response.errcode = response.ERR_NONE_AND_FIND_FAILURE
+            dets_msg.errcode = dets_msg.ERR_NONE_AND_FIND_FAILURE
+
+        return dets_msg, dets_img
+
+
+    # def detect_target(self, request, response):
+    #     target_object_types = request.object_types
+
+    #     if self.yolo_model is None:
+    #         response.errcode = response.ERR_NOT_INIT_MODEL
+    #     else:
+    #         ret_img, list_imgs = self.get_image(0, theta_list=self.theta_list, hfov_list=self.hfov_list)
+
+    #         list_img_infos = {
+    #             'cam_id': [0] * len(self.theta_list),
+    #             'theta': self.theta_list,
+    #             'hfov': self.hfov_list
+    #         }
+
+    #         if ret_img is False:
+    #             response.errcode = response.ERR_NO_IMAGE
+    #         else:
+    #             response = self.detect_common(list_imgs, response, list_img_infos)
+
+    #             detections_filtered = [item for item in response.detections 
+    #                                 if int(item.obj_type) in target_object_types]
+                
+    #             response.detections = detections_filtered
+
+    #             if len(response.detections) > 0:
+    #                 response.errcode = response.ERR_NONE_AND_FIND_SUCCESS
+    #             else:
+    #                 response.errcode = response.ERR_NONE_AND_FIND_FAILURE
+
+    #     self.get_logger().info('Incoming request @ detect_target\n\tresponse: %d,  %d(UNKNOWN), %d(FIND_FAIL), %d(FIND_SUCCESS)' % 
+    #                            (response.errcode, response.ERR_UNKNOWN, response.ERR_NONE_AND_FIND_FAILURE, response.ERR_NONE_AND_FIND_SUCCESS))
+
+    #     return response
+    
+    def start_detect_target(self, request, response):
+        if self.yolo_model is None:
+            self._init_detector()
+        
+        if self.yolo_model is None:
+            response.success = False
+            response.message = 'Cannot initialize detector.'
+        else:
+            if not self.detecting:
+                self.detect_object_types = request.object_types # TODO: check object_types index
+                self.detecting = True
+                self.thread = threading.Thread(target=self.detect_loop)
+                self.thread.start()
+                response.success = True
+                response.message = 'Detection started.'
+            else:
+                response.success = False
+                response.message = 'Detection is already running.'
+        
+        return response
+    
+    def stop_detect_target(self, request, response):
+        if self.detecting:
+            self.detecting = False
+            if self.thread is not None:
+                self.thread.join()
+            response.success = True
+            response.message = 'Detection stopped.'
+        else:
+            response.success = False
+            response.message = 'Detection is not running.'
 
         return response
+    
+    
+    def detect_loop(self):
+        target_object_types = self.detect_object_types
 
+        while self.detecting:
+            # get image from predefined cameras
+            res, list_imgs = self.get_rectified_ricoh_images(htheta_list=self.htheta_list, vtheta_list=self.vtheta_list,
+                                                                 hfov=self.hfov, vfov=self.vfov)
+            
+            list_img_infos = []
+            for idx, img in enumerate(list_imgs):
+                img_infos = {
+                    'cam_id': self.cam_id_ricoh,
+                    'img_w': img.shape[1],
+                    'img_h': img.shape[0],
+                    'htheta': self.htheta_list[idx],
+                    'vtheta': self.vtheta_list[idx],
+                    'hfov': self.hfov,
+                    'vfov': self.vfov
+                }
+                list_img_infos.append(img_infos)
 
-    def detect_target(self, request, response):
-        target_object_types = request.object_types
+            if res:
+                dets_msg, dets_pil_img = self.detect_common(list_imgs, list_img_infos)
 
-        if self.yolo_model is None:
-            response.errcode = response.ERR_NOT_INIT_MODEL
-        else:
-            ret_img, list_imgs = self.get_image(0, theta_list=self.theta_list, hfov_list=self.hfov_list)
-
-            list_img_infos = {
-                'cam_id': [0] * len(self.theta_list),
-                'theta': self.theta_list,
-                'hfov': self.hfov_list
-            }
-
-            if ret_img is False:
-                response.errcode = response.ERR_NO_IMAGE
-            else:
-                response = self.detect_common(list_imgs, response, list_img_infos)
-
-                detections_filtered = [item for item in response.detections 
+                detections_filtered = [item for item in dets_msg.detections 
                                     if int(item.obj_type) in target_object_types]
                 
-                response.detections = detections_filtered
+                dets_msg.detections = detections_filtered
 
-                if len(response.detections) > 0:
-                    response.errcode = response.ERR_NONE_AND_FIND_SUCCESS
+                if len(dets_msg.detections) > 0:
+                    dets_msg.errcode = dets_msg.ERR_NONE_AND_FIND_SUCCESS
                 else:
-                    response.errcode = response.ERR_NONE_AND_FIND_FAILURE
+                    dets_msg.errcode = dets_msg.ERR_NONE_AND_FIND_FAILURE
 
-        self.get_logger().info('Incoming request @ detect_target\n\tresponse: %d,  %d(UNKNOWN), %d(FIND_FAIL), %d(FIND_SUCCESS)' % 
-                               (response.errcode, response.ERR_UNKNOWN, response.ERR_NONE_AND_FIND_FAILURE, response.ERR_NONE_AND_FIND_SUCCESS))
+            self.get_logger().info('Incoming request @ detect_target\n\tresponse: %d,  %d(UNKNOWN), %d(FIND_FAIL), %d(FIND_SUCCESS)' % 
+                                (dets_msg.errcode, dets_msg.ERR_UNKNOWN, dets_msg.ERR_NONE_AND_FIND_FAILURE, dets_msg.ERR_NONE_AND_FIND_SUCCESS))
+            
+            # set heartbeats error code
+            self.heartbeats_errcode = dets_msg.errcode
+            
+            # 결과를 Image 메시지로 변환하여 퍼블리시
+            combined_pil_img = self.combine_pil_images(dets_pil_img)
+            dets_ros_img = self.pil_to_ros_image(combined_pil_img)
 
-        return response
+            self.publisher_detect.publish(dets_msg)
+            self.publisher_detect_img.publish(dets_ros_img)
+
+            rclpy.sleep(0.01)   # seconds
+        
+
+    # def detect(self, request, response):
+    #     if self.yolo_model is None:
+    #         response.errcode = response.ERR_NOT_INIT_MODEL
+    #     else:
+    #         theta_list = [request.theta]
+    #         hfov_list = [request.hfov]
+
+    #         ret_img, list_imgs = self.get_image(0, theta_list=theta_list, hfov_list=hfov_list)
+
+    #         list_img_infos = {
+    #             'cam_id': [0] * len(theta_list),
+    #             'theta': theta_list,
+    #             'hfov': hfov_list
+    #         }
+
+    #         if ret_img is False:
+    #             response.errcode = response.NO_IMAGE
+    #         else:
+    #             response = self.detect_common(list_imgs, response, list_img_infos)
+              
+    #     self.get_logger().info('Incoming request @ detect\n\tresponse: %d,  %d(UNKNOWN), %d(NONE_AND_FAIL), %d(NONE_AND_FIND)' % 
+    #                            (response.errcode, response.ERR_UNKNOWN, response.ERR_NONE_AND_FIND_FAILURE, response.ERR_NONE_AND_FIND_SUCCESS))
+
+    #     return response
     
 
-    def detect(self, request, response):
-        if self.yolo_model is None:
-            response.errcode = response.ERR_NOT_INIT_MODEL
-        else:
-            theta_list = [request.theta]
-            hfov_list = [request.hfov]
+    # def detect_all(self, request, response):
+    #     if self.yolo_model is None:
+    #         response.errcode = response.ERR_NOT_INIT_MODEL
+    #     else:
+    #         ret_img0, list_imgs0 = self.get_image(0, theta_list=self.theta_list, hfov_list=self.hfov_list)  # ricoh
+    #         # ret_img1, list_imgs1 = self.get_image(1)    # web or gopro
 
-            ret_img, list_imgs = self.get_image(0, theta_list=theta_list, hfov_list=hfov_list)
+    #         # ret_img = ret_img0 * ret_img1
+    #         # list_imgs = list_imgs0 + list_imgs1
 
-            list_img_infos = {
-                'cam_id': [0] * len(theta_list),
-                'theta': theta_list,
-                'hfov': hfov_list
-            }
+    #         ret_img = ret_img0
+    #         list_imgs = list_imgs0
 
-            if ret_img is False:
-                response.errcode = response.NO_IMAGE
-            else:
-                response = self.detect_common(list_imgs, response, list_img_infos)
+    #         list_img_infos = {
+    #             'cam_id': [0] * len(self.theta_list),
+    #             'theta': self.theta_list,
+    #             'hfov': self.hfov_list
+    #         }
+
+    #         if ret_img is False:
+    #             response.errcode = response.NO_IMAGE
+    #         else:
+    #             response = self.detect_common(list_imgs, response, list_img_infos)
               
-        self.get_logger().info('Incoming request @ detect\n\tresponse: %d,  %d(UNKNOWN), %d(NONE_AND_FAIL), %d(NONE_AND_FIND)' % 
-                               (response.errcode, response.ERR_UNKNOWN, response.ERR_NONE_AND_FIND_FAILURE, response.ERR_NONE_AND_FIND_SUCCESS))
+    #     self.get_logger().info('Incoming request @ detect_all\n\tresponse: %d,  %d(UNKNOWN), %d(NONE_AND_FAIL), %d(NONE_AND_FIND)' % 
+    #                            (response.errcode, response.ERR_UNKNOWN, response.ERR_NONE_AND_FIND_FAILURE, response.ERR_NONE_AND_FIND_SUCCESS))
 
-        return response
-    
-
-    def detect_all(self, request, response):
-        if self.yolo_model is None:
-            response.errcode = response.ERR_NOT_INIT_MODEL
-        else:
-            ret_img0, list_imgs0 = self.get_image(0, theta_list=self.theta_list, hfov_list=self.hfov_list)  # ricoh
-            # ret_img1, list_imgs1 = self.get_image(1)    # web or gopro
-
-            # ret_img = ret_img0 * ret_img1
-            # list_imgs = list_imgs0 + list_imgs1
-
-            ret_img = ret_img0
-            list_imgs = list_imgs0
-
-            list_img_infos = {
-                'cam_id': [0] * len(self.theta_list),
-                'theta': self.theta_list,
-                'hfov': self.hfov_list
-            }
-
-            if ret_img is False:
-                response.errcode = response.NO_IMAGE
-            else:
-                response = self.detect_common(list_imgs, response, list_img_infos)
-              
-        self.get_logger().info('Incoming request @ detect_all\n\tresponse: %d,  %d(UNKNOWN), %d(NONE_AND_FAIL), %d(NONE_AND_FIND)' % 
-                               (response.errcode, response.ERR_UNKNOWN, response.ERR_NONE_AND_FIND_FAILURE, response.ERR_NONE_AND_FIND_SUCCESS))
-
-        return response
+    #     return response
     
 
     def explain_path_to_gp(self, request, response):
