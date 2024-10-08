@@ -1,6 +1,0 @@
-
----
-uint8 exception
-uint8 NO_GP=1 # GP is not subscribed.
-uint8 GP_ON_OBSTACLE=2 # All GPs are on obstacles. 
-uint8 NO_PATH_TO_GP=3 # All GPs are not accessible.

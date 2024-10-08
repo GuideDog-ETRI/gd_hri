@@ -1,6 +1,0 @@
-uint64 course_id    # global identifier of the pre-registered courses
----
-uint8 errcode 0
-uint8 ERR_NONE=0			# success (no error)
-uint8 ERR_UNKNOWN=1			# fail (unknown error / general error)
-uint8 ERR_INVALID_ID=2		# fail (invalid course id)
