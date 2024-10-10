@@ -11,7 +11,7 @@ GDH (GuideDog HRI) module packages
 - 리코세타 설치없이 녹화된 영상을 사용하겠다면 역시 skip가능
 
 2.1.1. 리코세타 연결
-- 리코세타 카메라를 USB에 연결하고, 전원 스위치를 켠다. 모드 버튼을 눌러서 모드를 'LIVE'로 바꾼다.
+- 리코세타 카메라를 USB에 연결하고(초록불 충전중), 전원 스위치를 켠다(파란불). 창에 그림이 나오면, 모드 버튼을 눌러서 모드를 '캠코더+LIVE'로 바꾼다.
 
 2.1.2. Install driver with docker
 - To share topics between hostpc and docker container, add below code in ~/.bashrc in hostpc
@@ -20,33 +20,7 @@ GDH (GuideDog HRI) module packages
     export ROS_LOCALHOST_ONLY=1 # Topic will not go out of the PC. (It's ok between docker containers)
     ```
 
-- Option A와 B 중 하나를 선택해서 설치
-- (Option A) From [gd_sensor](https://github.com/GuideDog-ETRI/gd_sensor), install and run the driver and ros node for publishing images.
-    ```bash
-    git clone https://github.com/GuideDog-ETRI/gd_sensor
-    cd gd_sensor/scripts/install_manually/thetaz1
-    sudo ./install_thetaz1_driver.sh
-    ```
-
-- (Option B) From [github](https://github.com/stella-cv/theta_driver) directly, install and run the driver and ros node for publishing images. (만약 GPU가 없다면 --gpus all 라인은 지우고 할 것)
-    ```bash
-    git clone --recursive https://github.com/stella-cv/theta_driver
-    cd theta_driver
-    docker build -t theta_driver .
-    docker run -it --rm \
-        --privileged \
-        --gpus all \
-        --net=host --ipc=host\
-        -e DISPLAY=$DISPLAY \
-        -e ROS_DOMAIN_ID=$ROS_DOMAIN_ID \
-        -e ROS_LOCALHOST_ONLY=${ROS_LOCALHOST_ONLY} \
-        -v /etc/localtime:/etc/localtime:ro \
-        -v /etc/timezone:/etc/timezone:ro \
-        -v /tmp/.X11-unix:/tmp/.X11-unix \
-        -v /dev:/dev \
-        theta_driver
-    ros2 run theta_driver theta_driver_node
-    ```
+- [gd_theta_driver](https://github.com/GuideDog-ETRI/gd_theta_driver)의 without docker를 따라서 설치
 - 다음과 유사하게 나와야 함
     ```bash
     [INFO] [1720663252.803293205] [theta_driver]: Initializing
@@ -60,12 +34,18 @@ GDH (GuideDog HRI) module packages
     ``` bash
     ros2 run theta_driver theta_driver_node
     ```
-- /image_raw topic 을 확인
+
+- toplic /theta/image_raw/compressed 을 확인
     ```bash
     ros2 topic list
     ```
 
 ## 2.2. GDH packages
+- Assume all module is installed in conda env 'use_gopro'
+    ```bash
+    conda activate use_gopro
+    ```
+
 - Make a workspace
     ```bash
     mkdir ~/Desktop/gdh
@@ -97,14 +77,25 @@ GDH (GuideDog HRI) module packages
     pip install requests
     ```
 
-- Assume all module is installed in conda env 'use_gopro'
+- Download gd_ifc_pkg (interfaces for all gd modules) from [github](https://github.com/GuideDog-ETRI/gd_ifc_pkg).
     ```bash
-    conda activate use_gopro
+    cd src
+    git clone https://github.com/GuideDog-ETRI/gd_ifc_pkg    
+    ```
+
+    ```bash
+    sudo apt-get update
+    sudo apt-get install ros-humble-sensor-msgs
+    sudo apt-get install ros-humble-nav-msgs
+    sudo apt-get install ros-humble-grid-map-msgs
+    sudo apt-get install ros-humble-vision-msgs
+    ```
+    ```
+    cd ..
     ```
 
 - Open new terminal and build
     ```bash
-    cd ~/Desktop/gdh
     source /opt/ros/humble/setup.bash
     colcon build --packages-select gd_ifc_pkg ros2_gopro gdh_package gdh_speech_audio
     ```
