@@ -126,35 +126,26 @@ GDH (GuideDog HRI) module packages
 
 - (B) Run a GDH node (receiving images and processing HRI functions). 정상적이라면 이미지를 받은 알림과 GDHHeartBeat msg의 출력을 볼 수 있음.
     ```bash
-    conda activate use_gopro
-    cd ~/Desktop/gdh
     . install/setup.bash
     ros2 run gdh_package service
     ```
 
 - (C) Run a toy test client
     ```bash
-    conda activate use_gopro
-    cd ~/Desktop/gdh
     . install/setup.bash
 
-    ros2 run ros2_gopro video_sub /photo        # check dummy photo image
-    ros2 run ros2_gopro video_sub /image_raw    # check ricoh image
-
-    ros2 run gdh_package client_start_detect
-    ros2 topic list
-    ros2 topic echo /GDH_detections
-    ros2 run gdh_package client_display_detect  # /GDH_detections_img
-    ros2 run gdh_package client_stop_detect
+    ros2 run gdh_package client_start_detect    # start the object detection service
+    ros2 topic list                             
+    ros2 topic echo /GDH_detections             # display the result from the msg /GDH_detections
+    ros2 run gdh_package client_display_detect  # display the result image from the msg /GDH_detections_img
+    ros2 run gdh_package client_stop_detect     # stop the service
     ```
-    * Results are saved in the GDH folder.
+    * If the image is not displayed, the results are saved in the saved_image folder.
 
 ## 3.2. STT/TTS 파트
 - Open three new terminals for GDH node, toy client for sending speech codes, toy server for receiving command id.
 - (A) Run GDH node
     ```bash
-    conda activate use_gopro
-    cd ~/Desktop/gdh
     . install/setup.bash
     ros2 run gdh_speech_audio srv_play_audio_from_msg
     ros2 run gdh_speech_audio pub_command_from_speech
@@ -184,8 +175,6 @@ GDH (GuideDog HRI) module packages
 ## 3.3. GDH Heartbeat status
 - (A) Run GDH node
     ```bash
-    conda activate use_gopro
-    cd ~/Desktop/gdh
     . install/setup.bash
     ros2 run gdh_package service
     ```
