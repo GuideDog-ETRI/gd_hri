@@ -620,21 +620,20 @@ class GDHService(Node):
             # get image from predefined cameras
             res, list_imgs = self.get_rectified_ricoh_images(htheta_list=self.htheta_list, vtheta_list=self.vtheta_list,
                                                                  hfov=self.hfov, vfov=self.vfov)
-            
-            list_img_infos = []
-            for idx, img in enumerate(list_imgs):
-                img_infos = {
-                    'cam_id': self.cam_id_ricoh,
-                    'img_w': img.shape[1],
-                    'img_h': img.shape[0],
-                    'htheta': self.htheta_list[idx],
-                    'vtheta': self.vtheta_list[idx],
-                    'hfov': self.hfov,
-                    'vfov': self.vfov
-                }
-                list_img_infos.append(img_infos)
-
             if res:
+                list_img_infos = []
+                for idx, img in enumerate(list_imgs):
+                    img_infos = {
+                        'cam_id': self.cam_id_ricoh,
+                        'img_w': img.shape[1],
+                        'img_h': img.shape[0],
+                        'htheta': self.htheta_list[idx],
+                        'vtheta': self.vtheta_list[idx],
+                        'hfov': self.hfov,
+                        'vfov': self.vfov
+                    }
+                    list_img_infos.append(img_infos)
+
                 dets_msg, combined_np_img = self.detect_common(list_imgs, list_img_infos)
 
                 if target_object_types == self.all_object_type_id:
@@ -650,18 +649,20 @@ class GDHService(Node):
                 else:
                     dets_msg.errcode = dets_msg.ERR_NONE_AND_FIND_FAILURE
             
-            # set heartbeats error code
-            self.heartbeats_errcode = dets_msg.errcode
-            
-            # 결과를 Image 메시지로 변환하여 퍼블리시            
-            dets_ros_img = self.numpy_to_ros_image(combined_np_img)
+                # set heartbeats error code
+                self.heartbeats_errcode = dets_msg.errcode
+                
+                # 결과를 Image 메시지로 변환하여 퍼블리시            
+                dets_ros_img = self.numpy_to_ros_image(combined_np_img)
 
-            self.publisher_detect.publish(dets_msg)
-            self.publisher_detect_img.publish(dets_ros_img)
+                self.publisher_detect.publish(dets_msg)
+                self.publisher_detect_img.publish(dets_ros_img)
 
-            self.get_logger().info('Publishing dets_msg\n\terrcode: %d,  %d(UNKNOWN), %d(FIND_FAIL), %d(FIND_SUCCESS)' % 
-                    (dets_msg.errcode, dets_msg.ERR_UNKNOWN, dets_msg.ERR_NONE_AND_FIND_FAILURE, dets_msg.ERR_NONE_AND_FIND_SUCCESS))
-
+                self.get_logger().info('Publishing dets_msg\n\terrcode: %d,  %d(UNKNOWN), %d(FIND_FAIL), %d(FIND_SUCCESS)' % 
+                        (dets_msg.errcode, dets_msg.ERR_UNKNOWN, dets_msg.ERR_NONE_AND_FIND_FAILURE, dets_msg.ERR_NONE_AND_FIND_SUCCESS))
+            else:
+                self.heartbeats_errcode = GDHStatus.ERR_NO_IMAGE
+                self.get_logger().info('Set heartbeats_errcode as %d' % (GDHStatus.ERR_NO_IMAGE))
 
             rate.sleep()
         
