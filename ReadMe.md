@@ -225,7 +225,7 @@ GDH (GuideDog HRI) module packages
 - 사운드 카드 미인식 혹은 설정 오류
     ```
     ALSA lib confmisc.c:855:(parse_card) cannot find card '0'
-ALSA lib conf.c:5178:(_snd_config_evaluate) function snd_func_card_inum returned error: No such file or directory
+    ALSA lib conf.c:5178:(_snd_config_evaluate) function snd_func_card_inum returned error: No such file or directory
     ```
     리눅스 시스템에 로그인 필요
     아래 명령으로 사운드카드 인식상태 확인

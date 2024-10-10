@@ -21,6 +21,7 @@ from sensor_msgs.msg import Image
 from cv_bridge import CvBridge, CvBridgeError
 import cv2
 import threading
+import math
 
 # # TTS
 # from openai import OpenAI
@@ -504,10 +505,10 @@ class GDHService(Node):
             cam_id = list_img_infos[idx]['cam_id']
             img_w = list_img_infos[idx]['img_w']
             img_h = list_img_infos[idx]['img_h']
-            htheta = list_img_infos[idx]['htheta']
-            vtheta = list_img_infos[idx]['vtheta']
-            hfov = list_img_infos[idx]['hfov']
-            vfov = list_img_infos[idx]['vfov']
+            htheta_rad = math.radians(list_img_infos[idx]['htheta'])      # deg to rad
+            vtheta_rad = math.radians(list_img_infos[idx]['vtheta'])      # deg to rad
+            hfov_rad = math.radians(list_img_infos[idx]['hfov'])          # deg to rad
+            vfov_rad = math.radians(list_img_infos[idx]['vfov'])          # deg to rad
 
 
             for i_box in range(len(boxes_cls)):
@@ -524,7 +525,8 @@ class GDHService(Node):
                     det_res = GDHDetection2DExt(header=header, bbox=box2d, 
                                                 obj_type=obj_type, obj_status=obj_status,
                                                 cam_id=cam_id, img_w=img_w, img_h=img_h, 
-                                                htheta=htheta, vtheta=vtheta, hfov=hfov, vfov=vfov
+                                                htheta=htheta_rad, vtheta=vtheta_rad, 
+                                                hfov=hfov_rad, vfov=vfov_rad
                                                 )
                     # std_msgs/Header header
                     dets_msg.detections.append(det_res)
