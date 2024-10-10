@@ -1,5 +1,4 @@
 from gd_ifc_pkg.srv import GDHInitializeDetectStaticObject, GDHTerminateDetectStaticObject
-from gd_ifc_pkg.srv import GDHDetectStaticObjectAll, GDHDetectStaticObject
 from gd_ifc_pkg.srv import GDHStartDetectObject, GDHStopDetectObject
 from gd_ifc_pkg.srv import GDHExplainPathGP
 from gd_ifc_pkg.msg import GDHDetection2DExt, GDHDetections
@@ -130,8 +129,8 @@ class GDHService(Node):
         # self.topic_name = '/gopro'
 
         # service type(in/out params), name, callback func.
-        self.srv_init_detector = self.create_service(GDHInitializeDetectStaticObject, '/GDH_init_detector', self.init_detector)
-        self.srv_term_detector = self.create_service(GDHTerminateDetectStaticObject, '/GDH_term_detector', self.term_detector)
+        self.srv_init_detector = self.create_service(GDHInitializeDetectStaticObject, '/GDH_init_detect', self.init_detector)
+        self.srv_term_detector = self.create_service(GDHTerminateDetectStaticObject, '/GDH_term_detect', self.term_detector)
 
         # self.srv_detect_all = self.create_service(GDHDetectStaticObjectAll, '/GDH_detect_all', self.detect_all)
         # self.srv_detect = self.create_service(GDHDetectStaticObject, '/GDH_detect', self.detect)
@@ -139,8 +138,8 @@ class GDHService(Node):
         self.srv_explain_pathgp = self.create_service(GDHExplainPathGP, '/GDH_explain_path_to_gp', self.explain_path_to_gp)
         # self.srv_speak_codeid = self.create_service(GDHSpeakCodeID, '/GDH_speak_codeid', self.speak_codeid)
         
-        self.srv_start_detect_target = self.create_service(GDHStartDetectObject, '/GDH_start_detect', self.start_detect_callback)
-        self.srv_stop_detect_target = self.create_service(GDHStopDetectObject, '/GDH_stop_detect', self.stop_detect_callback)
+        self.srv_start_detect_target = self.create_service(GDHStartDetectObject, '/GDH_start_detect', self.start_detect_object)
+        self.srv_stop_detect_target = self.create_service(GDHStopDetectObject, '/GDH_stop_detect', self.stop_detect_object)
         self.publisher_detect = self.create_publisher(GDHDetections, '/GDH_detections', 10)
         self.publisher_detect_img = self.create_publisher(Image, '/GDH_detections_img', 10)
         self.detecting = False
@@ -151,7 +150,8 @@ class GDHService(Node):
         self.hfov = 90
         self.vfov = 70
         
-        self.detect_object_types = -1       # -1 means all object_types
+        self.all_object_type_id = 255
+        self.detect_object_types = self.all_object_type_id
 
         self.yolo_model = None
         self.yolo_conf_threshold = 0.5
@@ -163,7 +163,7 @@ class GDHService(Node):
         # }
 
         # # speak code id and TTS
-        # self.speech_audio_path = Path("models/GDH_speak_codeid_output.mp3")        
+        # self.speech_audio_path = Path("models/temp/GDH_speak_codeid_output.mp3")        
         # self.client_openai = OpenAI()
         # self.code_sentence_map = self.load_code_sentence_table('models/code_sentence_table.txt') 
 
@@ -186,6 +186,7 @@ class GDHService(Node):
         # self.send_request()
 
         # heartbeat status
+        self.heartbeats_errcode = GDHStatus.ERR_NONE  # 오류 없음
         self.publisher_status = self.create_publisher(GDHStatus, '/GDH_status', 1)
         self.timer = self.create_timer(timer_period_sec=1.0, callback=self.timer_callback)
 
@@ -323,38 +324,7 @@ class GDHService(Node):
     # image
     def listener_callback_ricoh(self, msg):
         self.latest_ricoh_erp_image = self.bridge.imgmsg_to_cv2(msg, 'bgr8')    # nparray is returned
-        self.get_logger().info(f'listener_callback: msg latest_ricoh_erp_image size {self.latest_ricoh_erp_image.shape}')
-
-        # cv2.imshow('listener', self.latest_image)
-        # cv2.waitKey(10)
-
-    # def get_image(self, cam_id=None, theta_list=0, hfov_list=90):
-    #     ret = True
-    #     res_imgs = []
-
-    #     print('func get_image is not implemented!')
-
-    #     if self.latest_image is not None:
-    #         if cam_type == 0:
-    #             if not isinstance(theta_list, list):
-    #                 theta_list = [theta_list]
-
-    #             if not isinstance(hfov_list, list):
-    #                 hfov_list = [hfov_list]
-            
-    #             ricohz_image = np.copy(self.latest_image)
-
-    #             for theta, hfov in zip(theta_list, hfov_list):
-    #                 planar_image = self.convert_to_planar(ricohz_image, u_deg=theta, fov_deg=(hfov, self.vfov))
-    #                 res_imgs.append(planar_image)
-    #                 self.get_logger().info(f'listener_callback: planar image size {planar_image.shape}')
-    #         else:
-    #             # use gopro or webcam
-    #             res_imgs.append(np.copy(self.latest_image))
-    #     else:
-    #         ret = False
-
-    #     return ret, res_imgs
+        # self.get_logger().info(f'listener_callback: msg latest_ricoh_erp_image size {self.latest_ricoh_erp_image.shape}')
 
     def get_rectified_ricoh_images(self, htheta_list, vtheta_list, hfov, vfov):        
         res_imgs = []
@@ -372,7 +342,7 @@ class GDHService(Node):
                 planar_image = self.convert_to_planar(ricohz_erp_image, fov_deg=(hfov, vfov), 
                                                       u_deg=htheta, v_deg=vtheta)
                 res_imgs.append(planar_image)
-                self.get_logger().info(f'listener_callback: rectified erp image size {planar_image.shape}')
+                self.get_logger().info(f'get_rectified_ricoh_images: rectified erp image size {planar_image.shape}')
 
             res = True
         else:
@@ -380,7 +350,6 @@ class GDHService(Node):
 
         return res, res_imgs
     
-
     def convert_to_planar(self, np_image, fov_deg=(90, 70), u_deg=0, v_deg=0, out_hw=(480, 640),  mode="bilinear"):
         '''
         fov_deg=(90, 70)
@@ -402,33 +371,17 @@ class GDHService(Node):
         
         return planarImg
     
-    # Combine PIL images into one
-    def combine_pil_images(self, pil_images):
-        # Calculate total width and max height for the combined image
-        total_width = sum(image.size[0] for image in pil_images)
-        max_height = max(image.size[1] for image in pil_images)
-        
-        # Create a new blank image with the calculated dimensions
-        combined_image = Image.new('RGB', (total_width, max_height))
-        
-        # Paste each image into the new image
-        x_offset = 0
-        for img in pil_images:
-            combined_image.paste(img, (x_offset, 0))
-            x_offset += img.size[0]
-        
+    # Function to combine a list of NumPy images into one
+    def combine_numpy_images(self, np_images):
+        # Assuming all images have the same height, stack them horizontally
+        combined_image = np.hstack(np_images)
         return combined_image
 
-    # Convert PIL image to ROS2 Image message
-    def pil_to_ros_image(self, pil_image):
-        # Convert PIL image to OpenCV format
-        open_cv_image = np.array(pil_image)
-        open_cv_image = cv2.cvtColor(open_cv_image, cv2.COLOR_RGB2BGR)
-        
-        # Use CvBridge to convert OpenCV image to ROS Image
+    # Convert the combined NumPy image into a ROS2 Image message
+    def numpy_to_ros_image(self, np_image):
+        # Use CvBridge to convert from OpenCV image (NumPy array) to ROS Image message
         bridge = CvBridge()
-        ros_image = bridge.cv2_to_imgmsg(open_cv_image, encoding="bgr8")
-        
+        ros_image = bridge.cv2_to_imgmsg(np_image, encoding="bgr8")
         return ros_image
 
     def _init_detector(self):
@@ -445,7 +398,6 @@ class GDHService(Node):
             self.get_logger().info(f'init_detector: yolo_model is not loaded. Path({repo}) is not exist.')
 
         return res
-
 
     def init_detector(self, request, response):
         res = self._init_detector()
@@ -476,7 +428,6 @@ class GDHService(Node):
 
         return response
     
-
     def det_result_to_gdi_code(self, class_index):
         # class_index to gdi object index and status index
         #  
@@ -531,7 +482,7 @@ class GDHService(Node):
     def detect_common(self, list_imgs, list_img_infos):
         # dets_msg
         dets_msg = GDHDetections()
-        dets_img = []
+        dets_np_img = []
 
         header = Header()
         header.stamp = Clock().now().to_msg()  # 현재 시간
@@ -580,14 +531,16 @@ class GDHService(Node):
 
             # result.show()  # display to screen
             # result.save(filename=f'result_{cam_id}_{htheta}_{hfov}.jpg')  # save to disk
-            dets_img.append(result)
+            dets_np_img.append(result.plot())  # save as numpy
+
+        combined_pil_img = self.combine_numpy_images(dets_np_img)
 
         if len(dets_msg.detections) > 0:
             dets_msg.errcode = dets_msg.ERR_NONE_AND_FIND_SUCCESS
         else:
             dets_msg.errcode = dets_msg.ERR_NONE_AND_FIND_FAILURE
 
-        return dets_msg, dets_img
+        return dets_msg, combined_pil_img
 
 
     # def detect_target(self, request, response):
@@ -624,7 +577,7 @@ class GDHService(Node):
 
     #     return response
     
-    def start_detect_target(self, request, response):
+    def start_detect_object(self, request, response):
         if self.yolo_model is None:
             self._init_detector()
         
@@ -633,7 +586,7 @@ class GDHService(Node):
             response.message = 'Cannot initialize detector.'
         else:
             if not self.detecting:
-                self.detect_object_types = request.object_types # TODO: check object_types index
+                self.detect_object_types = request.object_types
                 self.detecting = True
                 self.thread = threading.Thread(target=self.detect_loop)
                 self.thread.start()
@@ -645,7 +598,7 @@ class GDHService(Node):
         
         return response
     
-    def stop_detect_target(self, request, response):
+    def stop_detect_object(self, request, response):
         if self.detecting:
             self.detecting = False
             if self.thread is not None:
@@ -660,6 +613,7 @@ class GDHService(Node):
     
     
     def detect_loop(self):
+        rate = self.create_rate(10) # 10 Hz rate
         target_object_types = self.detect_object_types
 
         while self.detecting:
@@ -681,32 +635,35 @@ class GDHService(Node):
                 list_img_infos.append(img_infos)
 
             if res:
-                dets_msg, dets_pil_img = self.detect_common(list_imgs, list_img_infos)
+                dets_msg, combined_np_img = self.detect_common(list_imgs, list_img_infos)
 
-                detections_filtered = [item for item in dets_msg.detections 
-                                    if int(item.obj_type) in target_object_types]
-                
+                if target_object_types == self.all_object_type_id:
+                    detections_filtered = dets_msg.detections
+                else:
+                    detections_filtered = [item for item in dets_msg.detections 
+                                        if int(item.obj_type) in target_object_types]
+                    
                 dets_msg.detections = detections_filtered
 
                 if len(dets_msg.detections) > 0:
                     dets_msg.errcode = dets_msg.ERR_NONE_AND_FIND_SUCCESS
                 else:
                     dets_msg.errcode = dets_msg.ERR_NONE_AND_FIND_FAILURE
-
-            self.get_logger().info('Incoming request @ detect_target\n\tresponse: %d,  %d(UNKNOWN), %d(FIND_FAIL), %d(FIND_SUCCESS)' % 
-                                (dets_msg.errcode, dets_msg.ERR_UNKNOWN, dets_msg.ERR_NONE_AND_FIND_FAILURE, dets_msg.ERR_NONE_AND_FIND_SUCCESS))
             
             # set heartbeats error code
             self.heartbeats_errcode = dets_msg.errcode
             
-            # 결과를 Image 메시지로 변환하여 퍼블리시
-            combined_pil_img = self.combine_pil_images(dets_pil_img)
-            dets_ros_img = self.pil_to_ros_image(combined_pil_img)
+            # 결과를 Image 메시지로 변환하여 퍼블리시            
+            dets_ros_img = self.numpy_to_ros_image(combined_np_img)
 
             self.publisher_detect.publish(dets_msg)
             self.publisher_detect_img.publish(dets_ros_img)
 
-            rclpy.sleep(0.01)   # seconds
+            self.get_logger().info('Publishing dets_msg\n\terrcode: %d,  %d(UNKNOWN), %d(FIND_FAIL), %d(FIND_SUCCESS)' % 
+                    (dets_msg.errcode, dets_msg.ERR_UNKNOWN, dets_msg.ERR_NONE_AND_FIND_FAILURE, dets_msg.ERR_NONE_AND_FIND_SUCCESS))
+
+
+            rate.sleep()
         
 
     # def detect(self, request, response):

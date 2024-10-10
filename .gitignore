@@ -3,6 +3,8 @@
 /log/
 /models/aihub_pwalk
 /models/gd_demo
+/models/temp
+/saved_images/
 /src/gd_ifc_pkg
 src/gdh_interfaces(24.04.19).zip
 src/gdh_node/resource/gdh_node
@@ -24,4 +26,3 @@ result_0_0_90.jpg
 result_0_90_90.jpg
 result_0_180_90.jpg
 src/gdh_speech_audio/gdh_speech_audio/key_wallet.py
-models/GDH_speak_codeid_output.mp3

@@ -26,7 +26,12 @@ class MsgToAudio(Node):
         self.srv_speak_codeid = self.create_service(GDHSpeakCodeID, '/GDH_speak_codeid', self.speak_codeid)
         
         # speak code id and TTS
-        self.speech_audio_path = Path("models/GDH_speak_codeid_output.mp3")        
+        mp3_output_folder = 'models/temp'
+        
+        if not os.path.exists(mp3_output_folder):
+            os.makedirs(mp3_output_folder)
+
+        self.speech_audio_path = Path(f"{mp3_output_folder}/GDH_speak_codeid_output.mp3")        
         self.client_openai = OpenAI()
         self.code_sentence_map = self.load_code_sentence_table('models/code_sentence_table.txt') 
 

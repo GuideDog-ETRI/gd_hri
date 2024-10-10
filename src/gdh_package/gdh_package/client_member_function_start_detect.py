@@ -1,7 +1,6 @@
 import sys
 
-# from gdh_interfaces.srv import GDHInitializeDetectStaticObject
-from gd_ifc_pkg.srv import GDHInitializeDetectStaticObject
+from gd_ifc_pkg.srv import GDHStartDetectObject
 import rclpy
 from rclpy.node import Node
 
@@ -10,12 +9,13 @@ class MinimalClientAsync(Node):
 
     def __init__(self):
         super().__init__('minimal_client_async')
-        self.cli = self.create_client(GDHInitializeDetectStaticObject, '/GDH_init_detector')
+        self.cli = self.create_client(GDHStartDetectObject, '/GDH_start_detect')
         while not self.cli.wait_for_service(timeout_sec=1.0):
             self.get_logger().info('service not available, waiting again...')
-        self.req = GDHInitializeDetectStaticObject.Request()
+        self.req = GDHStartDetectObject.Request()
 
     def send_request(self):
+        self.req.object_types = 255 # All objects
         self.future = self.cli.call_async(self.req)
 
 
@@ -35,7 +35,7 @@ def main(args=None):
                     'Service call failed %r' % (e,))
             else:
                 minimal_client.get_logger().info(
-                    'Result of GDH_init_detector: %d' % (response.errcode)) 
+                    f'Result of GDH_start_detect: {response.success}, {response.message}') 
             break
 
     minimal_client.destroy_node()

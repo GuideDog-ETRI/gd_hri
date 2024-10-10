@@ -105,7 +105,7 @@ GDH (GuideDog HRI) module packages
 - Open three new terminals by Ctrl + Alt + T for (A) dummy photo publisher, (B) GDH node, and (C) toy test client
 
 - (A) 이미지를 publish하기위해 (A-1), (A-2), (A-3)중에 하나를 실행한다.
-- (A-1) 리코세타를 설치하지않고 녹화된 영상을 재생하겠다면, [다음 링크](https://drive.google.com/file/d/18xELEj7PeVmdU_xKqT7OH1pQPjSQ95zT/view?usp=drive_link)에서 파일을 받고 rosbag/rosbag2_2024_07_11-16_34_43 폴더로 복사 후, 다음을 실행한다
+- (A-1) 리코세타를 설치하지않고 녹화된 영상을 재생하겠다면, [다음 링크](https://drive.google.com/file/d/18xELEj7PeVmdU_xKqT7OH1pQPjSQ95zT/view?usp=drive_link)에서 파일을 받고 rosbag/rosbag2_2024_07_11-16_34_43 폴더로 복사 후, 다음을 실행한다. ros2 topic list 입력시 /image_raw가 있다면 성공.
     ```
     cd rosbag
     ./play.bash
@@ -124,7 +124,7 @@ GDH (GuideDog HRI) module packages
     ros2 run ros2_gopro photo_pub
     ```
 
-- (B) Run a GDH node (receiving images and processing HRI functions)
+- (B) Run a GDH node (receiving images and processing HRI functions). 정상적이라면 이미지를 받은 알림과 GDHHeartBeat msg의 출력을 볼 수 있음.
     ```bash
     conda activate use_gopro
     cd ~/Desktop/gdh
@@ -141,9 +141,11 @@ GDH (GuideDog HRI) module packages
     ros2 run ros2_gopro video_sub /photo        # check dummy photo image
     ros2 run ros2_gopro video_sub /image_raw    # check ricoh image
 
-    ros2 run gdh_package client_det_init
-    ros2 run gdh_package client_det_all
-    ros2 run gdh_package client_det_term
+    ros2 run gdh_package client_start_detect
+    ros2 topic list
+    ros2 topic echo /GDH_detections
+    ros2 run gdh_package client_display_detect  # /GDH_detections_img
+    ros2 run gdh_package client_stop_detect
     ```
     * Results are saved in the GDH folder.
 
