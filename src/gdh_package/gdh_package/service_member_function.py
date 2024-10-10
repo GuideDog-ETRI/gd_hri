@@ -115,7 +115,7 @@ class GDHService(Node):
 
         # subscription of ricoh image
         qos_profile = QoSProfile(depth=10)        
-        self.topic_name = '/image_raw'
+        self.topic_name = '/theta/image_raw/compressed'
         self.subscription = self.create_subscription(
             Image,
             self.topic_name,
