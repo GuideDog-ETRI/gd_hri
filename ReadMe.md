@@ -66,9 +66,15 @@ GDH (GuideDog HRI) module packages
     ```
 
 ## 2.2. GDH packages
+- Make a workspace
+    ```bash
+    mkdir ~/Desktop/gdh
+    cd ~/Desktop/gdh
+    ```
+
 - Download GDH packages from [github](https://github.com/GuideDog-ETRI/gd_hri). Assume it located in ~/Desktop/gdh
     ```bash
-    git clone https://github.com/GuideDog-ETRI/gd_hri
+    git clone https://github.com/GuideDog-ETRI/gd_hri .
     ```
 
 - To use TTS of OpenAI
@@ -92,11 +98,14 @@ GDH (GuideDog HRI) module packages
     ```
 
 - Assume all module is installed in conda env 'use_gopro'
-- Open new terminal and build
     ```bash
     conda activate use_gopro
-    source /opt/ros/humble/setup.bash
+    ```
+
+- Open new terminal and build
+    ```bash
     cd ~/Desktop/gdh
+    source /opt/ros/humble/setup.bash
     colcon build --packages-select gd_ifc_pkg ros2_gopro gdh_package gdh_speech_audio
     ```
 
