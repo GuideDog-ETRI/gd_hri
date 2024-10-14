@@ -26,3 +26,6 @@ result_0_0_90.jpg
 result_0_90_90.jpg
 result_0_180_90.jpg
 src/gdh_speech_audio/gdh_speech_audio/key_wallet.py
+src/gdh_speech_audio/gdh_speech_audio/vito_stt_client_pb2_grpc.py
+src/gdh_speech_audio/gdh_speech_audio/vito_stt_client_pb2.py
+src/gdh_speech_audio/gdh_speech_audio/voto-stt-client.proto
