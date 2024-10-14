@@ -94,18 +94,11 @@ GDH (GuideDog HRI) module packages
     cd ..
     ```
 
-- To use yolo-v8
-    ```bash
-    pip install ultralytics
-    pip install numpy==1.25.0
-    ```
-
 - Open new terminal and build
     ```bash
-    ./0build.sh
+    source /opt/ros/humble/setup.bash
+    colcon build --packages-select gd_ifc_pkg ros2_gopro gdh_package gdh_speech_audio
     ```
-
-
 
 # 3. 동작
 ## 3.1. GDH 검출기 파트
@@ -126,12 +119,15 @@ GDH (GuideDog HRI) module packages
     conda activate use_gopro
     cd ~/Desktop/gdh
     . install/setup.bash
+    # ros2 run ros2_gopro gopro_pub # current in error
+    # ros2 run ros2_gopro webcam_pub # dummy photo publisher
     ros2 run ros2_gopro photo_pub
     ```
 
 - (B) Run a GDH node (receiving images and processing HRI functions). 정상적이라면 이미지를 받은 알림과 GDHHeartBeat msg의 출력을 볼 수 있음.
     ```bash
-    ./1run.sh
+    . install/setup.bash
+    ros2 run gdh_package service
     ```
 
 - (C) Run a toy test client
@@ -150,9 +146,18 @@ GDH (GuideDog HRI) module packages
 - Open three new terminals for GDH node, toy client for sending speech codes, toy server for receiving command id.
 - (A) Run GDH node
     ```bash
-    ./1run.sh
+    . install/setup.bash
+    ros2 run gdh_speech_audio srv_play_audio_from_msg
+    ros2 run gdh_speech_audio pub_command_from_speech
     ```
 
+<!-- - (B) Run a toy server for receiving voice command ID
+    ```bash
+    conda activate use_gopro
+    cd ~/Desktop/gdh
+    . install/setup.bash
+    ros2 run gdh_package server_toy_gd_others
+    ``` -->
 - (B) Echo messages from voice command
     ```
     ros2 topic list
@@ -161,6 +166,8 @@ GDH (GuideDog HRI) module packages
 
 - (C) Run a toy client for sending speech codes
     ```bash
+    conda activate use_gopro
+    cd ~/Desktop/gdh
     . install/setup.bash
     ros2 run gdh_package client_code_send
     ```

@@ -1,5 +1,0 @@
-<launch>
-  <node pkg="gdh_package" exec="service" name="service" output="screen"></node>
-  <node pkg="gdh_speech_audio" exec="srv_play_audio_from_msg" name="srv_play_audio_from_msg" output="screen"></node>
-  <node pkg="gdh_speech_audio" exec="pub_command_from_speech" name="pub_command_from_speech" output="screen"></node>
-</launch>

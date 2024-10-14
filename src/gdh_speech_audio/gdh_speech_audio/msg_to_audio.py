@@ -12,7 +12,7 @@ from openai import OpenAI
 from pathlib import Path
 import pygame
 
-from .key_wallet import OPENAI_API_KEY
+from key_wallet import OPENAI_API_KEY
 
 # TTS
 os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
