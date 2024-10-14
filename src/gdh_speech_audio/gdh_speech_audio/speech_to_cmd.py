@@ -15,7 +15,7 @@ import gdh_speech_audio.vito_stt_client_pb2 as pb
 import gdh_speech_audio.vito_stt_client_pb2_grpc as pb_grpc
 from requests import Session
 
-from key_wallet import STT_CLIENT_ID, STT_CLIENT_SECRET
+from .key_wallet import STT_CLIENT_ID, STT_CLIENT_SECRET
 
 # STT
 STT_API_BASE = "https://openapi.vito.ai"
