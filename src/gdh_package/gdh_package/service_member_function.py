@@ -5,7 +5,7 @@ from gd_ifc_pkg.msg import GDHDetection2DExt, GDHDetections
 
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, DurabilityPolicy
+from rclpy.qos import QoSProfile, QoSReliabilityPolicy
 
 import os
 from PIL import Image as PilImage
@@ -17,7 +17,7 @@ import py360convert
 # Yolo and detector
 from ultralytics import YOLO
 from vision_msgs.msg import BoundingBox2D, Pose2D, Point2D
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import Image, CompressedImage
 from cv_bridge import CvBridge, CvBridgeError
 import cv2
 import threading
@@ -115,19 +115,16 @@ class GDHService(Node):
         super().__init__('gdh_service')     # node_name
 
         # subscription of ricoh image
-        qos_profile = QoSProfile(depth=10)        
-        self.topic_name = '/theta/image_raw/compressed'
+        qos_profile = QoSProfile(depth=10)
+        qos_profile.reliability = QoSReliabilityPolicy.BEST_EFFORT     
+        # Image        
         self.subscription = self.create_subscription(
-            Image,
-            self.topic_name,
+            CompressedImage, '/theta/image_raw/compressed',
             self.listener_callback_ricoh,
             qos_profile=qos_profile)
         self.bridge = CvBridge()
         self.subscription  # prevent unused variable warning
         self.latest_ricoh_erp_image = None
-
-        # TODO: subscription of gopro
-        # self.topic_name = '/gopro'
 
         # service type(in/out params), name, callback func.
         self.srv_init_detector = self.create_service(GDHInitializeDetectStaticObject, '/GDH_init_detect', self.init_detector)
@@ -146,8 +143,8 @@ class GDHService(Node):
         self.detecting = False
         self.thread = None
         
-        self.htheta_list = [-90, 0, 90, 180]  # [-180, 180] in degree
-        self.vtheta_list = [90, 90, 90, 90]     
+        self.htheta_list = [0, -90, 90]  # [-180, 180] in degree
+        self.vtheta_list = [0, 0, 0]     
         self.hfov = 90
         self.vfov = 70
         
@@ -155,7 +152,7 @@ class GDHService(Node):
         self.detect_object_types = self.all_object_type_id
 
         self.yolo_model = None
-        self.yolo_conf_threshold = 0.5
+        self.yolo_conf_threshold = 0.75
 
         self.cam_id_ricoh = 'theta_cart'
 
@@ -324,7 +321,11 @@ class GDHService(Node):
 
     # image
     def listener_callback_ricoh(self, msg):
-        self.latest_ricoh_erp_image = self.bridge.imgmsg_to_cv2(msg, 'bgr8')    # nparray is returned
+    	# raw image w/o compression to numpy
+        # self.latest_ricoh_erp_image = self.bridge.imgmsg_to_cv2(msg, 'bgr8')    # nparray is returned
+        # compressed image to numpy
+        np_arr = np.frombuffer(msg.data, np.uint8)        
+        self.latest_ricoh_erp_image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)    # nparray is returned
         # self.get_logger().info(f'listener_callback: msg latest_ricoh_erp_image size {self.latest_ricoh_erp_image.shape}')
 
     def get_rectified_ricoh_images(self, htheta_list, vtheta_list, hfov, vfov):        
