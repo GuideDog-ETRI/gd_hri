@@ -65,6 +65,9 @@ GDH (GuideDog HRI) module packages
 
 - To use STT of [ReturnZero](https://www.rtzr.ai/stt)
     ```bash
+    cd src/gdh_speech_audio/gdh_speech_audio
+    ```
+    ```bash
     # To Download definition (.proto) file
     wget https://raw.github.com/vito-ai/openapi-grpc/main/protos/vito-stt-client.proto
 
@@ -75,6 +78,13 @@ GDH (GuideDog HRI) module packages
     # This module requires the dependencies of grpcio and requests.
     pip install grpcio
     pip install requests
+    ```
+    ```bash
+    cd ../../..
+    ```
+    Open src/gdh_speech_audio/gdh_speech_audio/vito_stt_client_pb2_grpc.py. Then change the line 6 to the following line.
+    ```python
+    import gdh_speech_audio.vito_stt_client_pb2 as vito__stt__client__pb2
     ```
 
 - Download gd_ifc_pkg (interfaces for all gd modules) from [github](https://github.com/GuideDog-ETRI/gd_ifc_pkg).
