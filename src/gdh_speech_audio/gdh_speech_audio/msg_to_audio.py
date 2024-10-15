@@ -37,11 +37,16 @@ class MsgToAudio(Node):
 
     # TTS
     def play_audio(self, filepath):
-        pygame.mixer.init()
-        pygame.mixer.music.load(filepath)
-        pygame.mixer.music.play()
-        while pygame.mixer.music.get_busy():
-            continue
+        try:
+            pygame.mixer.init()
+            pygame.mixer.music.load(filepath)
+            pygame.mixer.music.play()
+            while pygame.mixer.music.get_busy():
+                continue
+        except pygame.error as e:
+            self.get_logger().error(f"Failed to play audio: {e}")
+        finally:
+            pygame.mixer.quit()  # 장치 해제
 
     def generate_speech(self, input_msg, model="tts-1", voice="alloy"):
         response = self.client_openai.audio.speech.create(
