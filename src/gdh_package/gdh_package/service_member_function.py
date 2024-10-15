@@ -2,13 +2,13 @@ from gd_ifc_pkg.srv import GDHInitializeDetectStaticObject, GDHTerminateDetectSt
 from gd_ifc_pkg.srv import GDHStartDetectObject, GDHStopDetectObject
 from gd_ifc_pkg.srv import GDHExplainPathGP
 from gd_ifc_pkg.msg import GDHDetection2DExt, GDHDetections
+from gd_ifc_pkg.srv import GDGGetImageGuideancePoint
 
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy
 
 import os
-from PIL import Image as PilImage
 import numpy as np
 
 # Ricoh Theta Z
@@ -325,6 +325,124 @@ class GDHService(Node):
 
         return dets_msg, combined_pil_img
     
+
+    def detect_common_and_draw_gp(self, list_imgs, list_img_infos):
+        # dets_msg
+        dets_msg = GDHDetections()
+        dets_np_img = []
+
+        header = Header()
+        header.stamp = Clock().now().to_msg()  # 현재 시간
+        header.frame_id = "none"
+        dets_msg.header = header
+        dets_msg.detections = []
+
+        # for testing
+        self.get_point_client = None
+        self.service_available = False  # 서비스 사용 가능 여부를 추적
+
+        # run yolo
+        results = self.yolo_model.predict(source=list_imgs)
+
+        # Process results list
+        for idx, result in enumerate(results):
+            boxes_cls = result.boxes.cls          # n_det
+            boxes_conf = result.boxes.conf        # n_det
+            boxes_xywh = result.boxes.xywh    # n_det x 4
+
+            # parsing result
+            cam_id = list_img_infos[idx]['cam_id']
+            img_w = list_img_infos[idx]['img_w']
+            img_h = list_img_infos[idx]['img_h']
+            htheta_rad = math.radians(list_img_infos[idx]['htheta'])      # deg to rad
+            vtheta_rad = math.radians(list_img_infos[idx]['vtheta'])      # deg to rad
+            hfov_rad = math.radians(list_img_infos[idx]['hfov'])          # deg to rad
+            vfov_rad = math.radians(list_img_infos[idx]['vfov'])          # deg to rad
+
+            for i_box in range(len(boxes_cls)):
+                conf = float(boxes_conf[i_box].item())
+                box_xywh = [float(item.item()) for item in boxes_xywh[i_box]]
+                cls = int(boxes_cls[i_box].item())
+
+                obj_type, obj_status = self.det_result_to_gdi_code(cls)
+
+                if conf >= self.yolo_conf_threshold:
+                    box2d = BoundingBox2D(center=Pose2D(position=Point2D(x=box_xywh[0], y=box_xywh[1]), 
+                                                        theta=float(0.0)), 
+                                            size_x=box_xywh[2], size_y=box_xywh[3])
+                    det_res = GDHDetection2DExt(header=header, bbox=box2d, 
+                                                obj_type=obj_type, obj_status=obj_status,
+                                                cam_id=cam_id, img_w=img_w, img_h=img_h, 
+                                                htheta=htheta_rad, vtheta=vtheta_rad, 
+                                                hfov=hfov_rad, vfov=vfov_rad)
+                    dets_msg.detections.append(det_res)
+
+            # save as numpy
+            np_result = result.plot()
+
+            # 서비스 클라이언트가 아직 생성되지 않았다면 생성
+            if self.get_point_client is None:
+                self.get_point_client = self.create_client(GDGGetImageGuideancePoint, '/get_image_guidance_point')
+                try:
+                    self.get_logger().info('Trying to create_client with topic name, get_image_guidance_point')
+                    if not self.get_point_client.wait_for_service(timeout_sec=1.0):
+                        self.get_logger().error('Service not available!')
+                        self.service_available = False  # 서비스가 사용 불가능한 경우 처리
+                    else:
+                        self.service_available = True  # 서비스 사용 가능 상태로 설정
+                except Exception as e:
+                    self.get_logger().error(f'Failed to wait for service: {str(e)}')
+                    self.service_available = False
+
+            # 서비스가 사용 가능한 경우에만 요청
+            if self.service_available:
+                srv_request = GDGGetImageGuideancePoint.Request()
+                srv_request.cam_id = cam_id
+                srv_request.img_w = img_w
+                srv_request.img_h = img_h
+                srv_request.htheta = htheta_rad
+                srv_request.vtheta = vtheta_rad
+                srv_request.hfov = hfov_rad
+                srv_request.vfov = vfov_rad
+
+                # 서비스 호출
+                try:
+                    future = self.get_point_client.call_async(srv_request)
+                    rclpy.spin_until_future_complete(self, future)
+                    response = future.result()
+
+                    if response.errcode == response.ERR_NONE:
+                        # Draw the point on the combined image
+                        np_result = self.draw_point_on_image(np_result, response.x, response.y)
+                        self.get_logger().info(f'Success to draw guidance point, {response.x}, {response.y}')
+                    else:
+                        self.get_logger().warn(f'Failed to get guidance point: {response.errcode}')
+                except Exception as e:
+                    self.get_logger().error(f'Failed to call guidance point service: {str(e)}')
+
+            dets_np_img.append(np_result)
+
+        combined_pil_img = self.combine_numpy_images(dets_np_img)
+
+        if len(dets_msg.detections) > 0:
+            dets_msg.errcode = dets_msg.ERR_NONE_AND_FIND_SUCCESS
+        else:
+            dets_msg.errcode = dets_msg.ERR_NONE_AND_FIND_FAILURE
+
+        return dets_msg, combined_pil_img
+        
+    def draw_point_on_image(self, img_np, x, y):
+        # Define the point properties (e.g., radius, color)
+        radius = 5
+        color = (255, 0, 0)  # Red color for the point (in BGR format for OpenCV)
+        thickness = -1  # Fill the circle
+
+        # Draw a circle at (x, y) with the defined radius and color
+        img_with_point_np = cv2.circle(img_np, (x, y), radius, color, thickness)
+
+        return img_with_point_np
+
+
     def start_detect_object(self, request, response):
         if self.yolo_model is None:
             self._init_detector()
