@@ -2,7 +2,7 @@ from gd_ifc_pkg.srv import GDHInitializeDetectStaticObject, GDHTerminateDetectSt
 from gd_ifc_pkg.srv import GDHStartDetectObject, GDHStopDetectObject
 from gd_ifc_pkg.srv import GDHExplainPathGP
 from gd_ifc_pkg.msg import GDHDetection2DExt, GDHDetections
-from gd_ifc_pkg.srv import GDGGetImageGuideancePoint
+from gd_ifc_pkg.srv import GDGGetImageGuidancePoint
 
 import rclpy
 from rclpy.node import Node
@@ -34,12 +34,20 @@ class GDHService(Node):
 
         # subscription of ricoh image
         qos_profile = QoSProfile(depth=10)
+        
+        # CompressedImage        
         qos_profile.reliability = QoSReliabilityPolicy.BEST_EFFORT     
-        # Image        
         self.subscription = self.create_subscription(
             CompressedImage, '/theta/image_raw/compressed',
-            self.listener_callback_ricoh,
+            self.listener_callback_ricoh_comprssed,
             qos_profile=qos_profile)
+        
+        # # Image
+        # self.subscription = self.create_subscription(
+        #     Image, '/theta/image_raw/compressed',
+        #     self.listener_callback_ricoh_raw,
+        #     qos_profile=qos_profile)
+        
         self.bridge = CvBridge()
         self.subscription  # prevent unused variable warning
         self.latest_ricoh_erp_image = None
@@ -75,7 +83,7 @@ class GDHService(Node):
         self.cam_id_ricoh = 'theta_cart'
 
         # heartbeat status
-        self.heartbeats_errcode = GDHStatus.ERR_NONE  # 오류 없음
+        self.heartbeats_det_errcode = GDHStatus.ERR_NONE  # 오류 없음
         self.publisher_status = self.create_publisher(GDHStatus, '/GDH_status', 1)
         self.timer = self.create_timer(timer_period_sec=1.0, callback=self.timer_callback)
 
@@ -92,21 +100,24 @@ class GDHService(Node):
         status_msg = GDHStatus()
         status_msg.header = header
 
-
-        status_msg.errcode = self.heartbeats_errcode
-        self.heartbeats_errcode = status_msg.ERR_NONE  # 오류 없음
+        if self.detecting:
+            status_msg.errcode = self.heartbeats_det_errcode
+        else:
+            status_msg.errcode = status_msg.ERR_NONE  # 오류 없음
 
         self.publisher_status.publish(status_msg)
         self.get_logger().info(f"Publishing GDH status: timestamp={status_msg.header.stamp.sec}, errcode={status_msg.errcode}")
 
     # image
-    def listener_callback_ricoh(self, msg):
-    	# raw image w/o compression to numpy
-        # self.latest_ricoh_erp_image = self.bridge.imgmsg_to_cv2(msg, 'bgr8')    # nparray is returned
+    def listener_callback_ricoh_comprssed(self, msg):
         # compressed image to numpy
         np_arr = np.frombuffer(msg.data, np.uint8)        
         self.latest_ricoh_erp_image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)    # nparray is returned
         # self.get_logger().info(f'listener_callback: msg latest_ricoh_erp_image size {self.latest_ricoh_erp_image.shape}')
+    
+    def listener_callback_ricoh_raw(self, msg):
+    	# raw image w/o compression to numpy
+        self.latest_ricoh_erp_image = self.bridge.imgmsg_to_cv2(msg, 'bgr8')    # nparray is returned
 
     def get_rectified_ricoh_images(self, htheta_list, vtheta_list, hfov, vfov):        
         res_imgs = []
@@ -261,16 +272,8 @@ class GDHService(Node):
 
         return res_obj_type, res_obj_status
 
-    def detect_common(self, list_imgs, list_img_infos):
-        # dets_msg
-        dets_msg = GDHDetections()
+    def detect_common(self, dets_msg, list_imgs, list_img_infos):
         dets_np_img = []
-
-        header = Header()
-        header.stamp = Clock().now().to_msg()  # 현재 시간
-        header.frame_id = "none"
-        dets_msg.header = header
-        dets_msg.detections = []
 
         # run yolo            
         results = self.yolo_model.predict(source=list_imgs)
@@ -303,7 +306,7 @@ class GDHService(Node):
                     box2d = BoundingBox2D(center=Pose2D(position=Point2D(x=box_xywh[0], y=box_xywh[1]), 
                                                         theta=float(0.0)), 
                                             size_x=box_xywh[2], size_y=box_xywh[3])
-                    det_res = GDHDetection2DExt(header=header, bbox=box2d, 
+                    det_res = GDHDetection2DExt(header=dets_msg.header, bbox=box2d, 
                                                 obj_type=obj_type, obj_status=obj_status,
                                                 cam_id=cam_id, img_w=img_w, img_h=img_h, 
                                                 htheta=htheta_rad, vtheta=vtheta_rad, 
@@ -326,16 +329,8 @@ class GDHService(Node):
         return dets_msg, combined_pil_img
     
 
-    def detect_common_and_draw_gp(self, list_imgs, list_img_infos):
-        # dets_msg
-        dets_msg = GDHDetections()
+    def detect_common_and_draw_gp(self, dets_msg, list_imgs, list_img_infos):
         dets_np_img = []
-
-        header = Header()
-        header.stamp = Clock().now().to_msg()  # 현재 시간
-        header.frame_id = "none"
-        dets_msg.header = header
-        dets_msg.detections = []
 
         # for testing
         self.get_point_client = None
@@ -370,7 +365,7 @@ class GDHService(Node):
                     box2d = BoundingBox2D(center=Pose2D(position=Point2D(x=box_xywh[0], y=box_xywh[1]), 
                                                         theta=float(0.0)), 
                                             size_x=box_xywh[2], size_y=box_xywh[3])
-                    det_res = GDHDetection2DExt(header=header, bbox=box2d, 
+                    det_res = GDHDetection2DExt(header=dets_msg.header, bbox=box2d, 
                                                 obj_type=obj_type, obj_status=obj_status,
                                                 cam_id=cam_id, img_w=img_w, img_h=img_h, 
                                                 htheta=htheta_rad, vtheta=vtheta_rad, 
@@ -382,7 +377,7 @@ class GDHService(Node):
 
             # 서비스 클라이언트가 아직 생성되지 않았다면 생성
             if self.get_point_client is None:
-                self.get_point_client = self.create_client(GDGGetImageGuideancePoint, '/get_image_guidance_point')
+                self.get_point_client = self.create_client(GDGGetImageGuidancePoint, '/get_image_guidance_point')
                 try:
                     self.get_logger().info('Trying to create_client with topic name, get_image_guidance_point')
                     if not self.get_point_client.wait_for_service(timeout_sec=1.0):
@@ -396,7 +391,7 @@ class GDHService(Node):
 
             # 서비스가 사용 가능한 경우에만 요청
             if self.service_available:
-                srv_request = GDGGetImageGuideancePoint.Request()
+                srv_request = GDGGetImageGuidancePoint.Request()
                 srv_request.cam_id = cam_id
                 srv_request.img_w = img_w
                 srv_request.img_h = img_h
@@ -483,6 +478,14 @@ class GDHService(Node):
         target_object_types = self.detect_object_types
 
         while self.detecting:
+            # dets_msg
+            dets_msg = GDHDetections()
+            header = Header()
+            header.stamp = Clock().now().to_msg()  # 현재 시간
+            header.frame_id = "none"
+            dets_msg.header = header
+            dets_msg.detections = []
+            
             # get image from predefined cameras
             res, list_imgs = self.get_rectified_ricoh_images(htheta_list=self.htheta_list, vtheta_list=self.vtheta_list,
                                                                  hfov=self.hfov, vfov=self.vfov)
@@ -500,7 +503,7 @@ class GDHService(Node):
                     }
                     list_img_infos.append(img_infos)
 
-                dets_msg, combined_np_img = self.detect_common(list_imgs, list_img_infos)
+                dets_msg, combined_np_img = self.detect_common(dets_msg, list_imgs, list_img_infos)
 
                 if target_object_types == self.all_object_type_id:
                     detections_filtered = dets_msg.detections
@@ -515,20 +518,22 @@ class GDHService(Node):
                 else:
                     dets_msg.errcode = dets_msg.ERR_NONE_AND_FIND_FAILURE
             
-                # set heartbeats error code
-                self.heartbeats_errcode = dets_msg.errcode
-                
-                # 결과를 Image 메시지로 변환하여 퍼블리시            
-                dets_ros_img = self.numpy_to_ros_image(combined_np_img)
-
-                self.publisher_detect.publish(dets_msg)
-                self.publisher_detect_img.publish(dets_ros_img)
-
                 self.get_logger().info('Publishing dets_msg\n\terrcode: %d,  %d(UNKNOWN), %d(FIND_FAIL), %d(FIND_SUCCESS)' % 
                         (dets_msg.errcode, dets_msg.ERR_UNKNOWN, dets_msg.ERR_NONE_AND_FIND_FAILURE, dets_msg.ERR_NONE_AND_FIND_SUCCESS))
             else:
-                self.heartbeats_errcode = GDHStatus.ERR_NO_IMAGE
-                self.get_logger().info('Set heartbeats_errcode as %d' % (GDHStatus.ERR_NO_IMAGE))
+                self.get_logger().info('No image for detection')
+
+                dets_msg.errcode = dets_msg.ERR_NO_IMAGE
+                combined_np_img = np.zeros((10, 10, 3), dtype=np.uint8)
+
+            # set heartbeats error code
+            self.heartbeats_det_errcode = dets_msg.errcode
+            
+            # 결과를 Image 메시지로 변환하여 퍼블리시            
+            dets_ros_img = self.numpy_to_ros_image(combined_np_img)
+            
+            self.publisher_detect.publish(dets_msg)
+            self.publisher_detect_img.publish(dets_ros_img)
 
             rate.sleep()
         

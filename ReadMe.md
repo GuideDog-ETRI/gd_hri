@@ -131,33 +131,28 @@ GDH (GuideDog HRI) module packages
     ```
     ros2 run theta_driver theta_driver_node
     ```
-- (A-3) Run a dummy photo publisher
-    ```bash
-    conda activate use_gopro
-    cd ~/Desktop/gdh
-    . install/setup.bash
-    ros2 run ros2_gopro photo_pub
-    ```
 
 - (B) Run a GDH node (receiving images and processing HRI functions). 정상적이라면 이미지를 받은 알림과 GDHHeartBeat msg의 출력을 볼 수 있음.
     ```bash
     ./1run.sh
     ```
 
-- (C) Run a toy test client
+- (C) Request services
     ```bash
-    conda activate use_gopro
-    cd ~/Desktop/gdh
     . install/setup.bash
 
-    ros2 run ros2_gopro video_sub /photo        # check dummy photo image
-    ros2 run ros2_gopro video_sub /image_raw    # check ricoh image
-
-    ros2 run gdh_package client_start_detect
+    # check image input
     ros2 topic list
-    ros2 topic echo /GDH_detections
+    ros2 topic echo /theta/image_raw/compressed
+
+    # start detector
+    ros2 service call /GDH_start_detect gd_ifc_pkg/srv/GDHStartDetectObject "{object_types: 10}"
+
+    # display result
     ros2 run gdh_package client_display_detect  # /GDH_detections_img
-    ros2 run gdh_package client_stop_detect
+
+    # stop detector
+    ros2 service call /GDH_stop_detect gd_ifc_pkg/srv/GDHStopDetectObject
     ```
     * Results are saved in the GDH folder.
 
