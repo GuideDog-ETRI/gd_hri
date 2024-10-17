@@ -509,7 +509,7 @@ class GDHService(Node):
                     detections_filtered = dets_msg.detections
                 else:
                     detections_filtered = [item for item in dets_msg.detections 
-                                        if int(item.obj_type) in target_object_types]
+                                        if int(item.obj_type) in [target_object_types]]
                     
                 dets_msg.detections = detections_filtered
 
