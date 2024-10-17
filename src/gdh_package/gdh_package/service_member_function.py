@@ -377,9 +377,9 @@ class GDHService(Node):
 
             # 서비스 클라이언트가 아직 생성되지 않았다면 생성
             if self.get_point_client is None:
-                self.get_point_client = self.create_client(GDGGetImageGuidancePoint, '/get_image_guidance_point')
+                self.get_point_client = self.create_client(GDGGetImageGuidancePoint, '/get_image_gp')
                 try:
-                    self.get_logger().info('Trying to create_client with topic name, get_image_guidance_point')
+                    self.get_logger().info('Trying to create_client with srv name, GDG - get_image_gp')
                     if not self.get_point_client.wait_for_service(timeout_sec=1.0):
                         self.get_logger().error('Service not available!')
                         self.service_available = False  # 서비스가 사용 불가능한 경우 처리
@@ -411,7 +411,7 @@ class GDHService(Node):
                         np_result = self.draw_point_on_image(np_result, response.x, response.y)
                         self.get_logger().info(f'Success to draw guidance point, {response.x}, {response.y}')
                     else:
-                        self.get_logger().warn(f'Failed to get guidance point: {response.errcode}')
+                        self.get_logger().warn(f'Failed to get drawable guidance point: {response.errcode}')
                 except Exception as e:
                     self.get_logger().error(f'Failed to call guidance point service: {str(e)}')
 

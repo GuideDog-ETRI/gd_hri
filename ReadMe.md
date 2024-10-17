@@ -226,3 +226,43 @@ GDH (GuideDog HRI) module packages
     ```
     aplay -l
     ```
+
+- 마이크 볼륨 컨트롤러가 안보이면,
+    ```
+    sudo apt install pavucontrol
+    ```
+
+<!-- - 다음과 같은 에러를 만나면,
+    ```
+    ALSA lib pcm_dmix.c:1032:(snd_pcm_dmix_open) unable to open slave
+    ALSA lib pcm.c:2664:(snd_pcm_open_noupdate) Unknown PCM cards.pcm.rear
+    ALSA lib pcm.c:2664:(snd_pcm_open_noupdate) Unknown PCM cards.pcm.center_lfe
+    ALSA lib pcm.c:2664:(snd_pcm_open_noupdate) Unknown PCM cards.pcm.side
+    ALSA lib pcm_oss.c:397:(_snd_pcm_oss_open) Cannot open device /dev/dsp
+    ALSA lib pcm_oss.c:397:(_snd_pcm_oss_open) Cannot open device /dev/dsp
+    ALSA lib confmisc.c:160:(snd_config_get_card) Invalid field card
+    ALSA lib pcm_usb_stream.c:482:(_snd_pcm_usb_stream_open) Invalid card 'card'
+    ALSA lib confmisc.c:160:(snd_config_get_card) Invalid field card
+    ALSA lib pcm_usb_stream.c:482:(_snd_pcm_usb_stream_open) Invalid card 'card'
+    ALSA lib pcm_dmix.c:1032:(snd_pcm_dmix_open) unable to open slave
+    ```
+    먼저 현재 재생가능한 오디오와 마이크의 card와 device 번호 획득 
+    ```bash
+    aplay -l
+    arecord -l
+    ```
+    얻어진 정보로 ~/.asoundrc 파일 설정 (ex: 오디오 card 0, device 1, 마이크 card 2, device 3)
+    ```
+    pcm.!default {
+        type hw
+        card 0
+        device 1
+    }
+
+    ctl.!default {
+        type hw
+        card 2
+        device 3
+    }
+
+    ``` -->

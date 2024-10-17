@@ -128,7 +128,9 @@ class SpeechToCmd(Node):
                 msg.usr_cmd = 255        ## Need None command
                 msg.cmd_param = msg.NONE
 
+                self.get_logger().info(f'Start recording and STT!')
                 stt_result = self.stt_client.transcribe_streaming_grpc(self.config)
+                self.get_logger().info(f'Stop recording, Receiving a result from STT!: {stt_result}')
 
                 if stt_result in self.commands.keys():
                     usr_cmd_str = self.commands[stt_result]['usr_cmd']
