@@ -384,6 +384,7 @@ class GDHService(Node):
                         self.get_logger().error('Service not available!')
                         self.service_available = False  # 서비스가 사용 불가능한 경우 처리
                     else:
+                        self.get_logger().info('Connected to create_client with srv name, GDG - get_image_gp')
                         self.service_available = True  # 서비스 사용 가능 상태로 설정
                 except Exception as e:
                     self.get_logger().error(f'Failed to wait for service: {str(e)}')
@@ -402,9 +403,11 @@ class GDHService(Node):
 
                 # 서비스 호출
                 try:
-                    future = self.get_point_client.call_async(srv_request)
-                    rclpy.spin_until_future_complete(self, future)
-                    response = future.result()
+                    self.get_logger().info(f'Trying to get_point_client!')
+                    # future = self.get_point_client.call_async(srv_request)
+                    # rclpy.spin_until_future_complete(self, future)
+                    # response = future.result()
+                    response = self.get_point_client.call(srv_request)
 
                     if response.errcode == response.ERR_NONE:
                         # Draw the point on the combined image
@@ -478,6 +481,7 @@ class GDHService(Node):
         target_object_types = self.detect_object_types
 
         while self.detecting:
+            self.get_logger().debug('Detecting loop start')
             # dets_msg
             dets_msg = GDHDetections()
             header = Header()
@@ -503,7 +507,7 @@ class GDHService(Node):
                     }
                     list_img_infos.append(img_infos)
 
-                dets_msg, combined_np_img = self.detect_common(dets_msg, list_imgs, list_img_infos)
+                dets_msg, combined_np_img = self.detect_common_and_draw_gp(dets_msg, list_imgs, list_img_infos)
 
                 if target_object_types == self.all_object_type_id:
                     detections_filtered = dets_msg.detections
@@ -518,7 +522,7 @@ class GDHService(Node):
                 else:
                     dets_msg.errcode = dets_msg.ERR_NONE_AND_FIND_FAILURE
             
-                self.get_logger().info('Publishing dets_msg\n\terrcode: %d,  %d(UNKNOWN), %d(FIND_FAIL), %d(FIND_SUCCESS)' % 
+                self.get_logger().info('Set dets_msg\n\terrcode: %d,  %d(UNKNOWN), %d(FIND_FAIL), %d(FIND_SUCCESS)' % 
                         (dets_msg.errcode, dets_msg.ERR_UNKNOWN, dets_msg.ERR_NONE_AND_FIND_FAILURE, dets_msg.ERR_NONE_AND_FIND_SUCCESS))
             else:
                 self.get_logger().info('No image for detection')
@@ -529,12 +533,15 @@ class GDHService(Node):
             # set heartbeats error code
             self.heartbeats_det_errcode = dets_msg.errcode
             
-            # 결과를 Image 메시지로 변환하여 퍼블리시            
+            # 결과를 Image 메시지로 변환하여 퍼블리시       
+            self.get_logger().debug('Convert np to ros image')    
             dets_ros_img = self.numpy_to_ros_image(combined_np_img)
             
+            self.get_logger().debug('Publish dets_msg and dets_ros_img')
             self.publisher_detect.publish(dets_msg)
             self.publisher_detect_img.publish(dets_ros_img)
 
+            self.get_logger().debug('Rate.sleep')
             rate.sleep()
         
     def explain_path_to_gp(self, request, response):
