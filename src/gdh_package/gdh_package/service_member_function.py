@@ -26,7 +26,6 @@ import math
 # Heartbeat
 from gd_ifc_pkg.msg import GDHStatus
 from std_msgs.msg import Header
-from rclpy.clock import Clock
 
 class GDHService(Node):
     def __init__(self):
@@ -68,6 +67,7 @@ class GDHService(Node):
         self.publisher_detect_img = self.create_publisher(Image, '/GDH_detections_img', 10)
         self.detecting = False
         self.thread = None
+        self.shutdown_event = threading.Event()  # Event to signal shutdown
         
         self.htheta_list = [0, -90, 90]  # [-180, 180] in degree
         self.vtheta_list = [0, 0, 0]     
@@ -87,13 +87,23 @@ class GDHService(Node):
         self.publisher_status = self.create_publisher(GDHStatus, '/GDH_status', 1)
         self.timer = self.create_timer(timer_period_sec=1.0, callback=self.timer_callback)
 
-    def __del__(self):
+    def destroy_node(self):
+        self.get_logger().info('Node is shutting down, stopping detection thread if running.')
+        self.detecting = False
+        self.shutdown_event.set()
+        if self.thread is not None and self.thread.is_alive():
+            self.thread.join(timeout=5)
+            if self.thread.is_alive():
+                self.get_logger().warn('Detection thread did not exit in time during node shutdown.')
+        
         self._term_detector()
+
+        super().destroy_node()
 
     # Heartbeat
     def timer_callback(self):
         header = Header()
-        header.stamp = Clock().now().to_msg()  # 현재 시간
+        header.stamp = self.get_clock().now().to_msg()  # 현재 시간
         header.frame_id = "gdh_status"
 
         # Heartbeat 메시지 생성
@@ -452,6 +462,7 @@ class GDHService(Node):
             if not self.detecting:
                 self.detect_object_types = request.object_types
                 self.detecting = True
+                self.shutdown_event.clear()  # Clear shutdown event before starting
                 self.thread = threading.Thread(target=self.detect_loop)
                 self.thread.start()
                 response.success = True
@@ -461,12 +472,15 @@ class GDHService(Node):
                 response.message = 'Detection is already running.'
         
         return response
-    
+
     def stop_detect_object(self, request, response):
         if self.detecting:
             self.detecting = False
+            self.shutdown_event.set()  # Signal the thread to exit
             if self.thread is not None:
-                self.thread.join()
+                self.thread.join(timeout=5)  # Wait for the thread to finish
+                if self.thread.is_alive():
+                    self.get_logger().warn('Detection thread did not exit in time.')
             response.success = True
             response.message = 'Detection stopped.'
         else:
@@ -477,68 +491,97 @@ class GDHService(Node):
     
     
     def detect_loop(self):
+        sleep_duration = 0.01  # 100Hz를 위한 0.01초 슬립
         target_object_types = self.detect_object_types
 
-        while self.detecting:
-            self.get_logger().debug('Detecting loop start')
-            # dets_msg
-            dets_msg = GDHDetections()
-            header = Header()
-            header.stamp = Clock().now().to_msg()  # 현재 시간
-            header.frame_id = "none"
-            dets_msg.header = header
-            dets_msg.detections = []
-            
-            # get image from predefined cameras
-            res, list_imgs = self.get_rectified_ricoh_images(htheta_list=self.htheta_list, vtheta_list=self.vtheta_list,
-                                                                 hfov=self.hfov, vfov=self.vfov)
-            if res:
-                list_img_infos = []
-                for idx, img in enumerate(list_imgs):
-                    img_infos = {
-                        'cam_id': self.cam_id_ricoh,
-                        'img_w': img.shape[1],
-                        'img_h': img.shape[0],
-                        'htheta': self.htheta_list[idx],
-                        'vtheta': self.vtheta_list[idx],
-                        'hfov': self.hfov,
-                        'vfov': self.vfov
-                    }
-                    list_img_infos.append(img_infos)
+        try:
+            while self.detecting and not self.shutdown_event.is_set():
+                self.get_logger().debug('Detecting loop start')
+                # dets_msg
+                dets_msg = GDHDetections()
+                header = Header()
+                header.stamp = self.get_clock().now().to_msg()  # 현재 시간
+                header.frame_id = "none"
+                dets_msg.header = header
+                dets_msg.detections = []
+                
+                # get image from predefined cameras
+                res, list_imgs = self.get_rectified_ricoh_images(
+                    htheta_list=self.htheta_list, 
+                    vtheta_list=self.vtheta_list,
+                    hfov=self.hfov, 
+                    vfov=self.vfov
+                )
+                if res:
+                    list_img_infos = []
+                    for idx, img in enumerate(list_imgs):
+                        img_infos = {
+                            'cam_id': self.cam_id_ricoh,
+                            'img_w': img.shape[1],
+                            'img_h': img.shape[0],
+                            'htheta': self.htheta_list[idx],
+                            'vtheta': self.vtheta_list[idx],
+                            'hfov': self.hfov,
+                            'vfov': self.vfov
+                        }
+                        list_img_infos.append(img_infos)
 
-                dets_msg, combined_np_img = self.detect_common_and_draw_gp(dets_msg, list_imgs, list_img_infos)
+                    dets_msg, combined_np_img = self.detect_common_and_draw_gp(
+                        dets_msg, list_imgs, list_img_infos
+                    )
 
-                if target_object_types == self.all_object_type_id:
-                    detections_filtered = dets_msg.detections
+                    if target_object_types == self.all_object_type_id:
+                        detections_filtered = dets_msg.detections
+                    else:
+                        detections_filtered = [
+                            item for item in dets_msg.detections 
+                            if int(item.obj_type) in [target_object_types]
+                        ]
+                        
+                    dets_msg.detections = detections_filtered
+
+                    if len(dets_msg.detections) > 0:
+                        dets_msg.errcode = dets_msg.ERR_NONE_AND_FIND_SUCCESS
+                    else:
+                        dets_msg.errcode = dets_msg.ERR_NONE_AND_FIND_FAILURE
+                
+                    self.get_logger().info(
+                        'Set dets_msg\n\terrcode: %d,  %d(UNKNOWN), %d(FIND_FAIL), %d(FIND_SUCCESS)' % 
+                        (
+                            dets_msg.errcode, 
+                            dets_msg.ERR_UNKNOWN, 
+                            dets_msg.ERR_NONE_AND_FIND_FAILURE, 
+                            dets_msg.ERR_NONE_AND_FIND_SUCCESS
+                        )
+                    )
                 else:
-                    detections_filtered = [item for item in dets_msg.detections 
-                                        if int(item.obj_type) in [target_object_types]]
-                    
-                dets_msg.detections = detections_filtered
+                    self.get_logger().info('No image for detection')
+                    dets_msg.errcode = dets_msg.ERR_NO_IMAGE
+                    combined_np_img = np.zeros((10, 10, 3), dtype=np.uint8)
 
-                if len(dets_msg.detections) > 0:
-                    dets_msg.errcode = dets_msg.ERR_NONE_AND_FIND_SUCCESS
-                else:
-                    dets_msg.errcode = dets_msg.ERR_NONE_AND_FIND_FAILURE
-            
-                self.get_logger().info('Set dets_msg\n\terrcode: %d,  %d(UNKNOWN), %d(FIND_FAIL), %d(FIND_SUCCESS)' % 
-                        (dets_msg.errcode, dets_msg.ERR_UNKNOWN, dets_msg.ERR_NONE_AND_FIND_FAILURE, dets_msg.ERR_NONE_AND_FIND_SUCCESS))
-            else:
-                self.get_logger().info('No image for detection')
+                # set heartbeats error code
+                self.heartbeats_det_errcode = dets_msg.errcode
+                
+                # 결과를 Image 메시지로 변환하여 퍼블리시       
+                self.get_logger().debug('Convert np to ros image')    
+                dets_ros_img = self.numpy_to_ros_image(combined_np_img)
+                
+                self.get_logger().debug('Publish dets_msg and dets_ros_img')
+                self.publisher_detect.publish(dets_msg)
+                self.publisher_detect_img.publish(dets_ros_img)
 
-                dets_msg.errcode = dets_msg.ERR_NO_IMAGE
-                combined_np_img = np.zeros((10, 10, 3), dtype=np.uint8)
-
-            # set heartbeats error code
-            self.heartbeats_det_errcode = dets_msg.errcode
-            
-            # 결과를 Image 메시지로 변환하여 퍼블리시       
-            self.get_logger().debug('Convert np to ros image')    
-            dets_ros_img = self.numpy_to_ros_image(combined_np_img)
-            
-            self.get_logger().debug('Publish dets_msg and dets_ros_img')
-            self.publisher_detect.publish(dets_msg)
-            self.publisher_detect_img.publish(dets_ros_img)
+                self.get_logger().debug('Sleeping for %s seconds' % sleep_duration)
+                # 종료 이벤트 또는 슬립 지속 시간을 대기
+                self.shutdown_event.wait(timeout=sleep_duration)
+        except Exception as e:
+            # 루프 내에서 발생하는 예외를 로그로 남김
+            self.get_logger().error(f"Exception in detect_loop: {e}")
+            import traceback
+            self.get_logger().error(traceback.format_exc())
+        finally:
+            # 스레드 종료 시 상태 리셋
+            self.get_logger().info('Exiting detect_loop')
+            self.detecting = False
 
         
     def explain_path_to_gp(self, request, response):
@@ -555,7 +598,6 @@ def main(args=None):
     gdh_service_node = GDHService()
     rclpy.spin(gdh_service_node)
     gdh_service_node.destroy_node()
-    
     rclpy.shutdown()
 
 
