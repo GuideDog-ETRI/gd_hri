@@ -477,7 +477,6 @@ class GDHService(Node):
     
     
     def detect_loop(self):
-        rate = self.create_rate(10) # 10 Hz rate
         target_object_types = self.detect_object_types
 
         while self.detecting:
@@ -541,8 +540,6 @@ class GDHService(Node):
             self.publisher_detect.publish(dets_msg)
             self.publisher_detect_img.publish(dets_ros_img)
 
-            self.get_logger().debug('Rate.sleep')
-            rate.sleep()
         
     def explain_path_to_gp(self, request, response):
         self.get_logger().info('TODO: not implemented\n')
