@@ -27,31 +27,45 @@ import math
 from gd_ifc_pkg.msg import GDHStatus
 from std_msgs.msg import Header
 
+# depth-estimation
+from transformers import pipeline
+from PIL import Image as PilImage
+
+# Object type and status
+from enum import IntEnum
+from ctypes import c_uint8
+class ObjectType(IntEnum):
+    DOOR = c_uint8(10).value
+    AUTOMATIC_DOOR = c_uint8(20).value
+    ELEVATOR_DOOR = c_uint8(30).value
+    ELEVATOR_BUTTON = c_uint8(31).value
+    ESCALATOR = c_uint8(40).value
+    STAIRS = c_uint8(50).value
+    PEDESTRIAN_TRAFFIC_LIGHT = c_uint8(61).value
+    SUBWAY_GATE = c_uint8(70).value
+    SUBWAY_TICKET_GATE_EACH = c_uint8(80).value
+    SUBWAY_TICKET_GATE_HANDICAP = c_uint8(81).value
+    SUBWAY_TICKET_GATE_ALL = c_uint8(82).value
+    SUBWAY_SCREEN_DOOR = c_uint8(90).value
+    ALL = c_uint8(255).value
+
+class ObjectStatus(IntEnum):
+    OPEN = c_uint8(3).value
+    CLOSED = c_uint8(4).value
+    SEMIOPEN = c_uint8(5).value
+    RED = c_uint8(10).value
+    GREEN = c_uint8(11).value
+    UNKNOWN = c_uint8(99).value
+
 class GDHService(Node):
     def __init__(self):
         super().__init__('gdh_service')     # node_name
 
-        self.input_type = 'ricoh_raw'   # ['rgb_raw' | 'ricoh_raw' | 'ricoh_comp' ]
+        self.input_type = 'ricoh_comp'   # ['rgb_raw' | 'ricoh_raw' | 'ricoh_comp' ]
         # 'rgb_raw': for testing GDH individual functions. Image are published from folders.
         # 'ricoh_raw': for testing ROS communications of GDH
         # 'rocoh_comp': for deployment
         
-        # # subscription of ricoh image
-        # qos_profile = QoSProfile(depth=10)
-        
-        # # CompressedImage        
-        # qos_profile.reliability = QoSReliabilityPolicy.BEST_EFFORT     
-        # self.subscription = self.create_subscription(
-        #     CompressedImage, '/theta/image_raw/compressed',
-        #     self.listener_callback_ricoh_comprssed,
-        #     qos_profile=qos_profile)
-        
-        # # Image
-        # self.subscription = self.create_subscription(
-        #     Image, '/theta/image_raw/compressed',
-        #     self.listener_callback_ricoh_raw,
-        #     qos_profile=qos_profile)
-
         subs_handlers = {
             'rgb_raw': self.handle_subs_rgb_raw,
             'ricoh_raw': self.handle_subs_ricoh_raw,
@@ -83,11 +97,7 @@ class GDHService(Node):
         self.srv_init_detector = self.create_service(GDHInitializeDetectStaticObject, '/GDH_init_detect', self.init_detector)
         self.srv_term_detector = self.create_service(GDHTerminateDetectStaticObject, '/GDH_term_detect', self.term_detector)
 
-        # self.srv_detect_all = self.create_service(GDHDetectStaticObjectAll, '/GDH_detect_all', self.detect_all)
-        # self.srv_detect = self.create_service(GDHDetectStaticObject, '/GDH_detect', self.detect)
-
         self.srv_explain_pathgp = self.create_service(GDHExplainPathGP, '/GDH_explain_path_to_gp', self.explain_path_to_gp)
-        # self.srv_speak_codeid = self.create_service(GDHSpeakCodeID, '/GDH_speak_codeid', self.speak_codeid)
         
         self.srv_start_detect_target = self.create_service(GDHStartDetectObject, '/GDH_start_detect', self.start_detect_object)
         self.srv_stop_detect_target = self.create_service(GDHStopDetectObject, '/GDH_stop_detect', self.stop_detect_object)
@@ -98,8 +108,8 @@ class GDHService(Node):
         self.shutdown_event = threading.Event()  # Event to signal shutdown
         
         # Forward is 180 in GDG
-        self.htheta_list = [180, 90, -90]  # [-180, 180] in degree, 
-        self.vtheta_list = [0, 0, 0]     
+        self.htheta_list = [90, 180, -90]  # [-180, 180] in degree, 
+        self.vtheta_list = [0, 0, 0]
         self.hfov = 90
         self.vfov = 70
         
@@ -111,10 +121,28 @@ class GDHService(Node):
 
         self.cam_id_ricoh = 'theta_cart'
 
-        # heartbeat status
-        self.heartbeats_det_errcode = GDHStatus.ERR_NONE  # 오류 없음
-        self.publisher_status = self.create_publisher(GDHStatus, '/GDH_status', 1)
-        self.timer = self.create_timer(timer_period_sec=1.0, callback=self.timer_callback)
+        self.testing_w_GDG = False
+
+        # # heartbeat status - yochin: temporary disabled to test scenario
+        # self.heartbeats_det_errcode = GDHStatus.ERR_NONE  # 오류 없음
+        # self.publisher_status = self.create_publisher(GDHStatus, '/GDH_status', 1)
+        # self.timer = self.create_timer(timer_period_sec=1.0, callback=self.timer_callback)
+
+        # classify door status (open / close) with depth estimation
+        self.check_door_status = False
+        self.get_logger().info(f"Check_door_status: {self.check_door_status}")
+
+        if self.check_door_status:
+            self.pipe_depth_est = pipeline(task="depth-estimation", model="depth-anything/Depth-Anything-V2-Small-hf")
+            self.get_logger().info(f"Initialized self.pipe_depth_est")
+
+        # Store depth information and bounding boxes for multiple elevators
+        self.elevator_depth_buffers = {}
+        self.elevator_bboxes = {}
+        self.elevator_bboxes_info = {}
+        self.elevator_last_seen = {}
+
+        self.get_logger().info(f"End of the GDH.__init__")
 
     def destroy_node(self):
         self.get_logger().info('Node is shutting down, stopping detection thread if running.')
@@ -357,6 +385,58 @@ class GDHService(Node):
 
         return response
     
+    def display_depth(self, np_depth):
+        # 깊이 이미지 정규화 (0~255로 스케일링)
+        normalized_depth_image = cv2.normalize(np_depth, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+
+        # 컬러맵 적용하여 시각화 (COLORMAP_JET 사용)
+        colorized_depth_image = cv2.applyColorMap(normalized_depth_image, cv2.COLORMAP_JET)
+
+        return colorized_depth_image
+
+    
+    def is_door_open(self, np_depth, box_xywh, depth_buffer, depth_change_threshold=0.2):
+        # box_xywh is in (x_center, y_center, width, height) format
+        cx, cy, w, h = box_xywh
+
+        # Convert (cx, cy, w, h) to (x_min, y_min, x_max, y_max)
+        x_min = int(cx - w / 2)
+        y_min = int(cy - h / 2)
+        x_max = int(cx + w / 2)
+        y_max = int(cy + h / 2)
+
+        depth_roi = np_depth[y_min:y_max, x_min:x_max]
+        depth_roi_resized = np.resize(depth_roi, (50, 25))
+
+        avg_depth = np.mean(depth_roi_resized[np.isfinite(depth_roi_resized)])
+
+        self.get_logger().info(f'is_door_open: cur_avg_depth {avg_depth}, {box_xywh}')        
+        if len(depth_buffer) > 0:
+            self.get_logger().info(f'is_door_open: prev_avg_depth {depth_buffer[-1]}')
+
+            depth_diff = avg_depth - depth_buffer[-1]
+            if depth_diff > depth_change_threshold:
+                return True
+
+        depth_buffer.append(avg_depth)
+
+        # from datetime import datetime
+        # current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        # np_depth_disp = self.display_depth(np_depth)
+        # output_filename = f'./{current_time}_depth.jpg'
+        # cv2.imwrite(output_filename, np_depth_disp)
+
+        # # np_depth_roi_disp = self.display_depth(depth_roi)
+        # output_filename = f'./{current_time}_depth_roi.jpg'
+        # cv2.imwrite(output_filename, np_depth_disp[y_min:y_max, x_min:x_max])
+
+        # # Save depth ROI as a text file for human readability
+        # depth_roi_filename = f'./{current_time}_depth_roi.txt'
+        # np.savetxt(depth_roi_filename, depth_roi_resized, fmt='%.2f')
+
+        return False
+    
     def det_result_to_gdi_code(self, class_index):
         # class_index to gdi object index and status index
         #  
@@ -369,57 +449,127 @@ class GDHService(Node):
 
         # class_name = self.yolo_model.names[int(class_index)]
 
-        res_obj_status = 0
-        if class_index in [0, 1, 2]:
-            res_obj_type = 10   # DOOR
+        res_obj_status = ObjectStatus.UNKNOWN
+        if class_index in [0, 1, 2]:    # Closed / Semi-open / Open DOOR
+            res_obj_type = ObjectType.DOOR   # DOOR
             if class_index == 0:
-                res_obj_status = 4  # closed
+                res_obj_status = ObjectStatus.CLOSED  # closed
             elif class_index == 1:
-                res_obj_status = 5  # semi-open
+                res_obj_status = ObjectStatus.SEMIOPEN  # semi-open
             elif class_index == 2:
-                res_obj_status = 3  # open
+                res_obj_status = ObjectStatus.OPEN  # open
 
-        elif class_index in [3, 4]:
-            res_obj_type = 61   # PEDESTRIAN_TRAFFIC_LIGHT
+        elif class_index in [3, 4]:     # PEDESTRIAN_TRAFFIC_LIGHT
+            res_obj_type = ObjectType.PEDESTRIAN_TRAFFIC_LIGHT
             if class_index == 3:
-                res_obj_status = 10     # RED
+                res_obj_status = ObjectStatus.RED
             else:
-                res_obj_status = 11     # GREEN
+                res_obj_status = ObjectStatus.GREEN
         elif class_index == 5:
-            res_obj_type = 50   # STAIRS
+            res_obj_type = ObjectType.STAIRS 
         elif class_index == 6:
-            res_obj_type = 40   # ESCALATOR
+            res_obj_type = ObjectType.ESCALATOR
         elif class_index == 7:
-            res_obj_type = 70   # SUBWAY_GATE
+            res_obj_type = ObjectType.SUBWAY_GATE
         elif class_index == 8:
-            res_obj_type = 20   # AUTOMATIC_DOOR
+            res_obj_type = ObjectType.AUTOMATIC_DOOR
+            res_obj_status = ObjectStatus.CLOSED
         elif class_index == 9:
-            res_obj_type = 30   # ELEVATOR_DOOR
+            res_obj_type = ObjectType.ELEVATOR_DOOR
+            res_obj_status = ObjectStatus.CLOSED
         elif class_index == 10:
-            res_obj_type = 31   # ELEVATOR_BUTTON
+            res_obj_type = ObjectType.ELEVATOR_BUTTON
         elif class_index == 11:
-            res_obj_type = 80   # 
+            res_obj_type = ObjectType.SUBWAY_TICKET_GATE_EACH
         elif class_index == 12:
-            res_obj_type = 81   # 
+            res_obj_type = ObjectType.SUBWAY_TICKET_GATE_HANDICAP
         elif class_index == 13:
-            res_obj_type = 82   # 
+            res_obj_type = ObjectType.SUBWAY_TICKET_GATE_ALL
         elif class_index == 14:
-            res_obj_type = 90   # SUBWAY_SCREEN_DOOR
+            res_obj_type = ObjectType.SUBWAY_SCREEN_DOOR
 
         return res_obj_type, res_obj_status
 
-    def detect_common(self, dets_msg, list_imgs, list_img_infos):
+    def match_existing_elevator(self, new_cam_idx, new_bbox, iou_threshold=0.3):
+        def calculate_iou(bbox1, bbox2):
+            # bbox1, bbox2 are in (x_center, y_center, width, height) format
+            x1_center, y1_center, w1, h1 = bbox1
+            x2_center, y2_center, w2, h2 = bbox2
+
+            # Convert (x_center, y_center, width, height) to (x_min, y_min, x_max, y_max)
+            x1_min = x1_center - w1 / 2
+            y1_min = y1_center - h1 / 2
+            x1_max = x1_center + w1 / 2
+            y1_max = y1_center + h1 / 2
+
+            x2_min = x2_center - w2 / 2
+            y2_min = y2_center - h2 / 2
+            x2_max = x2_center + w2 / 2
+            y2_max = y2_center + h2 / 2
+
+            # Calculate the (x, y) coordinates of the intersection rectangle
+            inter_x_min = max(x1_min, x2_min)
+            inter_y_min = max(y1_min, y2_min)
+            inter_x_max = min(x1_max, x2_max)
+            inter_y_max = min(y1_max, y2_max)
+
+            # Check if there is no overlap
+            if inter_x_max < inter_x_min or inter_y_max < inter_y_min:
+                return 0.0
+
+            # Calculate intersection area
+            inter_area = (inter_x_max - inter_x_min) * (inter_y_max - inter_y_min)
+
+            # Calculate area of each bounding box
+            bbox1_area = w1 * h1
+            bbox2_area = w2 * h2
+
+            # Calculate IoU
+            iou = inter_area / float(bbox1_area + bbox2_area - inter_area)
+
+            return iou
+
+        for elevator_id, idx_and_bbox in self.elevator_bboxes.items():
+            cam_idx, bbox = idx_and_bbox
+
+            if cam_idx == new_cam_idx:
+                iou = calculate_iou(bbox, new_bbox)
+                if iou > iou_threshold:
+                    return elevator_id
+        return None
+    
+    def detect_common_and_draw_gp(self, dets_msg, list_imgs, list_img_infos):
         dets_np_img = []
 
-        # run yolo            
+        # for testing with GDG
+        if self.testing_w_GDG:
+            self.get_point_client = None
+            self.service_available = False  # 서비스 사용 가능 여부를 추적
+
+        # run yolo
         results = self.yolo_model.predict(source=list_imgs)
+
+        list_np_depth_imgs = []
+        if self.check_door_status:
+            # numpy to pil
+            for ith_depth, np_img in enumerate(list_imgs):
+                pil_img = PilImage.fromarray(np_img)
+                pil_depth_res = self.pipe_depth_est(pil_img)
+                pil_depth = pil_depth_res['predicted_depth']        # ['predicted_depth': np.2dim, 'depth': pil_image]
+                np_depth = np.array(pil_depth)
+                list_np_depth_imgs.append(np_depth)
+
+            # self.get_logger().info(f'img_shape: {list_imgs[0].shape}')
+            # self.get_logger().info(f'depth_shape: {list_np_depth_imgs[0].shape}')
+                
+        detected_elevator_ids = set()
 
         # Process results list
         for idx, result in enumerate(results):
             # data = result.boxes.data
             boxes_cls = result.boxes.cls          # n_det
             boxes_conf = result.boxes.conf        # n_det
-            boxes_xywh = result.boxes.xywh    # n_det x 4
+            boxes_xywh = result.boxes.xywh    # n_det x 4 (cx, cy, w, h)
 
             # parsing result
             cam_id = list_img_infos[idx]['cam_id']
@@ -430,13 +580,36 @@ class GDHService(Node):
             hfov_rad = math.radians(list_img_infos[idx]['hfov'])          # deg to rad
             vfov_rad = math.radians(list_img_infos[idx]['vfov'])          # deg to rad
 
-
             for i_box in range(len(boxes_cls)):
                 conf = float(boxes_conf[i_box].item())
                 box_xywh = [float(item.item()) for item in boxes_xywh[i_box]]
                 cls = int(boxes_cls[i_box].item())
 
                 obj_type, obj_status = self.det_result_to_gdi_code(cls)
+
+                if self.check_door_status and obj_type == ObjectType.ELEVATOR_DOOR:
+                    matched_elevator_id = self.match_existing_elevator(idx, box_xywh)
+                    if matched_elevator_id:
+                        elevator_id = matched_elevator_id
+                    else:
+                        elevator_id = f"elevator_{len(self.elevator_bboxes) + 1}"
+                        self.elevator_depth_buffers[elevator_id] = []
+
+                    depth_buffer = self.elevator_depth_buffers[elevator_id]
+                    if self.is_door_open(list_np_depth_imgs[idx], box_xywh, depth_buffer, depth_change_threshold=0.2):
+                        obj_status = ObjectStatus.OPEN
+                    else:
+                        obj_status = ObjectStatus.CLOSED
+                    self.get_logger().info(f'detected elevators: {obj_status}')
+
+                    # Update the bounding box and last seen time
+                    self.elevator_bboxes[elevator_id] = [idx, box_xywh]
+                    self.elevator_bboxes_info[elevator_id] = [idx, cam_id, img_w, img_h, htheta_rad, vtheta_rad, hfov_rad, vfov_rad]
+
+                    self.elevator_last_seen[elevator_id] = self.get_clock().now()
+                    detected_elevator_ids.add(elevator_id)
+                else:
+                    elevator_id = None
 
                 if conf >= self.yolo_conf_threshold:
                     box2d = BoundingBox2D(center=Pose2D(position=Point2D(x=box_xywh[0], y=box_xywh[1]), 
@@ -451,112 +624,91 @@ class GDHService(Node):
                     # std_msgs/Header header
                     dets_msg.detections.append(det_res)
 
-            # result.show()  # display to screen
-            # result.save(filename=f'result_{cam_id}_{htheta}_{hfov}.jpg')  # save to disk
-            dets_np_img.append(result.plot())  # save as numpy
-
-        combined_pil_img = self.combine_numpy_images(dets_np_img)
-
-        if len(dets_msg.detections) > 0:
-            dets_msg.errcode = dets_msg.ERR_NONE_AND_FIND_SUCCESS
-        else:
-            dets_msg.errcode = dets_msg.ERR_NONE_AND_FIND_FAILURE
-
-        return dets_msg, combined_pil_img
-    
-
-    def detect_common_and_draw_gp(self, dets_msg, list_imgs, list_img_infos):
-        dets_np_img = []
-
-        # for testing
-        self.get_point_client = None
-        self.service_available = False  # 서비스 사용 가능 여부를 추적
-
-        # run yolo
-        results = self.yolo_model.predict(source=list_imgs)
-
-        # Process results list
-        for idx, result in enumerate(results):
-            boxes_cls = result.boxes.cls          # n_det
-            boxes_conf = result.boxes.conf        # n_det
-            boxes_xywh = result.boxes.xywh    # n_det x 4
-
-            # parsing result
-            cam_id = list_img_infos[idx]['cam_id']
-            img_w = list_img_infos[idx]['img_w']
-            img_h = list_img_infos[idx]['img_h']
-            htheta_rad = math.radians(list_img_infos[idx]['htheta'])      # deg to rad
-            vtheta_rad = math.radians(list_img_infos[idx]['vtheta'])      # deg to rad
-            hfov_rad = math.radians(list_img_infos[idx]['hfov'])          # deg to rad
-            vfov_rad = math.radians(list_img_infos[idx]['vfov'])          # deg to rad
-
-            for i_box in range(len(boxes_cls)):
-                conf = float(boxes_conf[i_box].item())
-                box_xywh = [float(item.item()) for item in boxes_xywh[i_box]]
-                cls = int(boxes_cls[i_box].item())
-
-                obj_type, obj_status = self.det_result_to_gdi_code(cls)
-
-                if conf >= self.yolo_conf_threshold:
-                    box2d = BoundingBox2D(center=Pose2D(position=Point2D(x=box_xywh[0], y=box_xywh[1]), 
-                                                        theta=float(0.0)), 
-                                            size_x=box_xywh[2], size_y=box_xywh[3])
-                    det_res = GDHDetection2DExt(header=dets_msg.header, bbox=box2d, 
-                                                obj_type=obj_type, obj_status=obj_status,
-                                                cam_id=cam_id, img_w=img_w, img_h=img_h, 
-                                                htheta=htheta_rad, vtheta=vtheta_rad, 
-                                                hfov=hfov_rad, vfov=vfov_rad)
-                    dets_msg.detections.append(det_res)
-
             # save as numpy
             np_result = result.plot()
 
-            # 서비스 클라이언트가 아직 생성되지 않았다면 생성
-            if self.get_point_client is None:
-                self.get_point_client = self.create_client(GDGGetImageGuidancePoint, '/get_image_gp')
-                try:
-                    self.get_logger().info('Trying to create_client with srv name, GDG - get_image_gp')
-                    if not self.get_point_client.wait_for_service(timeout_sec=1.0):
-                        self.get_logger().error('Get GP Service is not available!')
-                        self.service_available = False  # 서비스가 사용 불가능한 경우 처리
-                    else:
-                        self.get_logger().info('Connected to create_client with srv name, GDG - get_image_gp')
-                        self.service_available = True  # 서비스 사용 가능 상태로 설정
-                except Exception as e:
-                    self.get_logger().error(f'Failed to wait for service: {str(e)}')
-                    self.service_available = False
+            if self.testing_w_GDG:
+                # 서비스 클라이언트가 아직 생성되지 않았다면 생성
+                if self.get_point_client is None:
+                    self.get_point_client = self.create_client(GDGGetImageGuidancePoint, '/get_image_gp')
+                    try:
+                        self.get_logger().info('Trying to create_client with srv name, GDG - get_image_gp')
+                        if not self.get_point_client.wait_for_service(timeout_sec=1.0):
+                            self.get_logger().error('Get GP Service is not available!')
+                            self.service_available = False  # 서비스가 사용 불가능한 경우 처리
+                        else:
+                            self.get_logger().info('Connected to create_client with srv name, GDG - get_image_gp')
+                            self.service_available = True  # 서비스 사용 가능 상태로 설정
+                    except Exception as e:
+                        self.get_logger().error(f'Failed to wait for service: {str(e)}')
+                        self.service_available = False
 
-            # 서비스가 사용 가능한 경우에만 요청
-            if self.service_available:
-                srv_request = GDGGetImageGuidancePoint.Request()
-                srv_request.cam_id = cam_id
-                srv_request.img_w = img_w
-                srv_request.img_h = img_h
-                srv_request.htheta = htheta_rad
-                srv_request.vtheta = vtheta_rad
-                srv_request.hfov = hfov_rad
-                srv_request.vfov = vfov_rad
+                # 서비스가 사용 가능한 경우에만 요청
+                if self.service_available:
+                    srv_request = GDGGetImageGuidancePoint.Request()
+                    srv_request.cam_id = cam_id
+                    srv_request.img_w = img_w
+                    srv_request.img_h = img_h
+                    srv_request.htheta = htheta_rad
+                    srv_request.vtheta = vtheta_rad
+                    srv_request.hfov = hfov_rad
+                    srv_request.vfov = vfov_rad
 
-                # 서비스 호출
-                try:
-                    self.get_logger().info(f'Trying to get_point_client!')
-                    # future = self.get_point_client.call_async(srv_request)
-                    # rclpy.spin_until_future_complete(self, future)
-                    # response = future.result()
-                    response = self.get_point_client.call(srv_request)
+                    # 서비스 호출
+                    try:
+                        self.get_logger().info(f'Trying to get_point_client!')
+                        # future = self.get_point_client.call_async(srv_request)
+                        # rclpy.spin_until_future_complete(self, future)
+                        # response = future.result()
+                        response = self.get_point_client.call(srv_request)
 
-                    if response.errcode == response.ERR_NONE:
-                        # Draw the point on the combined image
-                        np_result = self.draw_point_on_image(np_result, response.x, response.y)
-                        self.get_logger().info(f'Success to draw guidance point, {response.x}, {response.y}')
-                    else:
-                        self.get_logger().warn(f'Failed to get drawable guidance point: {response.errcode}')
-                except Exception as e:
-                    self.get_logger().error(f'Failed to call guidance point service: {str(e)}')
+                        if response.errcode == response.ERR_NONE:
+                            # Draw the point on the combined image
+                            np_result = self.draw_point_on_image(np_result, response.x, response.y)
+                            self.get_logger().info(f'Success to draw guidance point, {response.x}, {response.y}')
+                        else:
+                            self.get_logger().warn(f'Failed to get drawable guidance point: {response.errcode}')
+                    except Exception as e:
+                        self.get_logger().error(f'Failed to call guidance point service: {str(e)}')
 
             dets_np_img.append(np_result)
 
         combined_pil_img = self.combine_numpy_images(dets_np_img)
+
+        # Maintain the bounding box for undetected elevators
+        if self.check_door_status:
+            current_time = self.get_clock().now()
+            for elevator_id, idx_box_xywh in list(self.elevator_bboxes.items()):
+                box_xywh = idx_box_xywh[1]
+                if elevator_id not in detected_elevator_ids:
+                    last_seen = self.elevator_last_seen.get(elevator_id)
+                    if last_seen and (current_time - last_seen).nanoseconds < 30 * 1e9:  # 30 seconds tolerance
+                        # the last seen time is in valid time limit
+                        depth_buffer = self.elevator_depth_buffers[elevator_id]
+                        cam_idx, cam_id, img_w, img_h, htheta_rad, vtheta_rad, hfov_rad, vfov_rad = self.elevator_bboxes_info[elevator_id]
+
+                        if self.is_door_open(list_np_depth_imgs[cam_idx], box_xywh, depth_buffer, depth_change_threshold=0.2):
+                            obj_status = ObjectStatus.OPEN
+                        else:
+                            obj_status = ObjectStatus.CLOSED
+                        self.get_logger().info(f'undetected elevators: {obj_status}')
+
+                        # Create a detection message for the elevator that was not detected in the current frame
+                        box2d = BoundingBox2D(center=Pose2D(position=Point2D(x=box_xywh[0], y=box_xywh[1]), theta=float(0.0)),
+                                            size_x=box_xywh[2], size_y=box_xywh[3])
+                        det_res = GDHDetection2DExt(header=dets_msg.header, bbox=box2d, 
+                                                    obj_type=ObjectType.ELEVATOR_DOOR, obj_status=obj_status,
+                                                    cam_id=cam_id, img_w=img_w, img_h=img_h, 
+                                                    htheta=htheta_rad, vtheta=vtheta_rad, 
+                                                    hfov=hfov_rad, vfov=vfov_rad
+                                                    )
+                        dets_msg.detections.append(det_res)
+                    else:
+                        # Remove elevator data if it has not been seen for a while
+                        del self.elevator_bboxes[elevator_id]
+                        del self.elevator_bboxes_info[elevator_id]
+                        del self.elevator_depth_buffers[elevator_id]
+                        del self.elevator_last_seen[elevator_id]
 
         if len(dets_msg.detections) > 0:
             dets_msg.errcode = dets_msg.ERR_NONE_AND_FIND_SUCCESS
@@ -575,7 +727,6 @@ class GDHService(Node):
         img_with_point_np = cv2.circle(img_np, (x, y), radius, color, thickness)
 
         return img_with_point_np
-
 
     def start_detect_object(self, request, response):
         if self.yolo_model is None:
@@ -735,3 +886,19 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
+
+    # from transformers import pipeline
+    # from PIL import Image
+    # import requests
+
+    # # load pipe
+    # pipe = pipeline(task="depth-estimation", model="depth-anything/Depth-Anything-V2-Small-hf")
+
+    # # load image
+    # url = 'http://images.cocodataset.org/val2017/000000039769.jpg'
+    # image = Image.open(requests.get(url, stream=True).raw)
+
+    # # inference
+    # depth = pipe(image)["depth"]
+
+    # print(depth)

@@ -115,8 +115,6 @@ GDH (GuideDog HRI) module packages
     ./0build.sh
     ```
 
-
-
 # 3. 동작
 ## 3.1. GDH 검출기 파트
 - Open three new terminals by Ctrl + Alt + T for (A) dummy photo publisher, (B) GDH node, and (C) toy test client
@@ -130,6 +128,11 @@ GDH (GuideDog HRI) module packages
 - (A-2) 리코세타를 설치했고 리코세타 노드를 띄우지 않았으면 아래를 실행한다 (노드를 띄웠다면 skip).
     ```
     ros2 run theta_driver theta_driver_node
+    ```
+
+- (A-3) 특정 폴더의 이미지를 publish할 경우
+    ```
+    ros2 run ros2_gopro photo_pub
     ```
 
 - (B) Run a GDH node (receiving images and processing HRI functions). 정상적이라면 이미지를 받은 알림과 GDHHeartBeat msg의 출력을 볼 수 있음.
