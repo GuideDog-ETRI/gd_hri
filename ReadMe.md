@@ -110,6 +110,10 @@ GDH (GuideDog HRI) module packages
     pip install numpy==1.25.0
     ```
 
+- Download [Yolo models](https://drive.google.com/drive/folders/1DFF6rFE7NYYMgBKvXmN59T1wD3KD05Tb?usp=sharing) and place in the folder /models.
+
+- Create /src/gdh_speech_audio/gdh_speech_audio/key_wallet.py file.
+
 - Open new terminal and build
     ```bash
     ./0build.sh
