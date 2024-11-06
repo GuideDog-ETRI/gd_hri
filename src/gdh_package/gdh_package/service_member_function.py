@@ -123,10 +123,10 @@ class GDHService(Node):
 
         self.testing_w_GDG = False
 
-        # # heartbeat status - yochin: temporary disabled to test scenario
-        # self.heartbeats_det_errcode = GDHStatus.ERR_NONE  # 오류 없음
-        # self.publisher_status = self.create_publisher(GDHStatus, '/GDH_status', 1)
-        # self.timer = self.create_timer(timer_period_sec=1.0, callback=self.timer_callback)
+        # heartbeat status - yochin: temporary disabled to test scenario
+        self.heartbeats_det_errcode = GDHStatus.ERR_NONE  # 오류 없음
+        self.publisher_status = self.create_publisher(GDHStatus, '/GDH_status', 1)
+        self.timer = self.create_timer(timer_period_sec=1.0, callback=self.timer_callback)
 
         # classify door status (open / close) with depth estimation
         self.check_door_status = False
