@@ -130,10 +130,8 @@ class SpeechToCmd(Node):
 
                 self.get_logger().info(f'Start recording and STT!')
                 stt_result_w_space = self.stt_client.transcribe_streaming_grpc(self.config)
+                stt_result = stt_result_w_space.replace(" ", "")        # remove all space
                 self.get_logger().info(f'Stop recording, Receiving a result from STT!: {stt_result}')
-
-                # remove all space
-                stt_result = stt_result_w_space.replace(" ", "")
 
                 if stt_result in self.commands.keys():
                     usr_cmd_str = self.commands[stt_result]['usr_cmd']
