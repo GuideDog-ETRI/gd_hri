@@ -239,6 +239,23 @@ GDH (GuideDog HRI) module packages
     sudo apt install pavucontrol
     ```
 
+- docker내에서 블루투스 헤드셋 장치를 사용하려면,
+    ```bash
+    sudo apt install bluez
+    bluetoothctl
+    ```
+    으로 페어링 여부 확인
+
+    
+
+    ```bash
+    sudo apt-get install alsa-utils
+    aplay -l
+    arecord -l
+    ```
+    위 리스트에서 블루투스 장치가 나오는지 확인
+    
+
 <!-- - 다음과 같은 에러를 만나면,
     ```
     ALSA lib pcm_dmix.c:1032:(snd_pcm_dmix_open) unable to open slave
