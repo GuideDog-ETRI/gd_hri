@@ -31,22 +31,25 @@ from std_msgs.msg import Header
 from transformers import pipeline
 from PIL import Image as PilImage
 
+# yaml
+import yaml
+
 # Object type and status
 from enum import IntEnum
 from ctypes import c_uint8
 class ObjectType(IntEnum):
     DOOR = c_uint8(10).value
-    AUTOMATIC_DOOR = c_uint8(20).value
-    ELEVATOR_DOOR = c_uint8(30).value
-    ELEVATOR_BUTTON = c_uint8(31).value
-    ESCALATOR = c_uint8(40).value
-    STAIRS = c_uint8(50).value
-    PEDESTRIAN_TRAFFIC_LIGHT = c_uint8(61).value
-    SUBWAY_GATE = c_uint8(70).value
-    SUBWAY_TICKET_GATE_EACH = c_uint8(80).value
-    SUBWAY_TICKET_GATE_HANDICAP = c_uint8(81).value
-    SUBWAY_TICKET_GATE_ALL = c_uint8(82).value
-    SUBWAY_SCREEN_DOOR = c_uint8(90).value
+    # AUTOMATIC_DOOR = c_uint8(20).value
+    ELEVATOR_DOOR = c_uint8(11).value
+    # ELEVATOR_BUTTON = c_uint8(31).value
+    STAIRS = c_uint8(12).value
+    ESCALATOR = c_uint8(13).value    
+    SUBWAY_GATE = c_uint8(15).value
+    SUBWAY_TICKET_GATE_EACH = c_uint8(16).value
+    # SUBWAY_TICKET_GATE_HANDICAP = c_uint8(81).value
+    # SUBWAY_TICKET_GATE_ALL = c_uint8(82).value
+    PEDESTRIAN_TRAFFIC_LIGHT = c_uint8(17).value
+    SUBWAY_SCREEN_DOOR = c_uint8(18).value
     ALL = c_uint8(255).value
 
 class ObjectStatus(IntEnum):
@@ -57,9 +60,18 @@ class ObjectStatus(IntEnum):
     GREEN = c_uint8(11).value
     UNKNOWN = c_uint8(99).value
 
+
 class GDHService(Node):
     def __init__(self):
         super().__init__('gdh_service')     # node_name
+
+        # load from conf.yaml
+        path_to_config = 'models/gdh_config.yaml'
+        if os.path.exists(path_to_config):
+            with open(path_to_config) as fid:
+                conf = yaml.full_load(fid)
+        else:
+            raise AssertionError(f'No gdh_config file in {path_to_config}.')
 
         self.input_type = 'ricoh_comp'   # ['rgb_raw' | 'ricoh_raw' | 'ricoh_comp' ]
         # 'rgb_raw': for testing GDH individual functions. Image are published from folders.
@@ -108,20 +120,23 @@ class GDHService(Node):
         self.shutdown_event = threading.Event()  # Event to signal shutdown
         
         # Forward is 180 in GDG
-        self.htheta_list = [90, 180, -90]  # [-180, 180] in degree, 
+        self.cam_id_ricoh = conf['camera']['id']
+        # self.htheta_list = [90, 180, -90]  # [-180, 180] in degree, 
+        self.htheta_list = conf['camera']['htheta_list']
         self.vtheta_list = [0, 0, 0]
-        self.hfov = 90
+        # self.hfov = 90
+        self.hfov = conf['camera']['hfov']
         self.vfov = 70
         
         self.all_object_type_id = 255
         self.detect_object_types = self.all_object_type_id
 
         self.yolo_model = None
-        self.yolo_conf_threshold = 0.75
+        self.yolo_conf_threshold = conf['yolo_model']['conf_threshold']
+        self.yolo_repo = conf['yolo_model']['repo']
 
-        self.cam_id_ricoh = 'theta_cart'
 
-        self.testing_w_GDG = False
+        self.testing_w_GDG = conf['misc']['draw_gp']
 
         # heartbeat status - yochin: temporary disabled to test scenario
         self.heartbeats_det_errcode = GDHStatus.ERR_NONE  # 오류 없음
@@ -129,11 +144,11 @@ class GDHService(Node):
         self.timer = self.create_timer(timer_period_sec=1.0, callback=self.timer_callback)
 
         # classify door status (open / close) with depth estimation
-        self.check_door_status = False
+        self.check_door_status = conf['elevator_door_status']['do_check']
         self.get_logger().info(f"Check_door_status: {self.check_door_status}")
 
         if self.check_door_status:
-            self.pipe_depth_est = pipeline(task="depth-estimation", model="depth-anything/Depth-Anything-V2-Small-hf")
+            self.pipe_depth_est = pipeline(task="depth-estimation", model=conf['elevator_door_status']['depth_repo'])
             self.get_logger().info(f"Initialized self.pipe_depth_est")
 
         # Store depth information and bounding boxes for multiple elevators
@@ -227,6 +242,8 @@ class GDHService(Node):
     def listener_callback_rgb_raw(self, msg):
     	# raw image w/o compression to numpy
         self.latest_rgb_raw_image = self.bridge.imgmsg_to_cv2(msg, 'bgr8')    # nparray is returned
+
+
 
     def get_rectified_ricoh_images(self, htheta_list, vtheta_list, hfov, vfov):        
         res_imgs = []
@@ -343,16 +360,14 @@ class GDHService(Node):
 
     def _init_detector(self):
         # Load a model
-        repo = "models/gd_demo/train958/weights/best.pt"
-
-        if os.path.exists(repo):
-            self.yolo_model = YOLO(repo)
+        if os.path.exists(self.yolo_repo):
+            self.yolo_model = YOLO(self.yolo_repo)
             res = True
-            self.get_logger().info(f'init_detector: yolo_model is loaded from {repo}.')
+            self.get_logger().info(f'init_detector: yolo_model is loaded from {self.yolo_repo}.')
         else:
             self.yolo_model = None
             res = False
-            self.get_logger().info(f'init_detector: yolo_model is not loaded. Path({repo}) is not exist.')
+            self.get_logger().info(f'init_detector: yolo_model is not loaded. Path({self.yolo_repo}) is not exist.')
 
         return res
 
@@ -471,20 +486,24 @@ class GDHService(Node):
             res_obj_type = ObjectType.ESCALATOR
         elif class_index == 7:
             res_obj_type = ObjectType.SUBWAY_GATE
-        elif class_index == 8:
-            res_obj_type = ObjectType.AUTOMATIC_DOOR
+        elif class_index == 8:  # AUTOMATIC_DOOR
+            # res_obj_type = ObjectType.AUTOMATIC_DOOR
+            res_obj_type = ObjectType.DOOR
             res_obj_status = ObjectStatus.CLOSED
         elif class_index == 9:
             res_obj_type = ObjectType.ELEVATOR_DOOR
             res_obj_status = ObjectStatus.CLOSED
         elif class_index == 10:
-            res_obj_type = ObjectType.ELEVATOR_BUTTON
+            # res_obj_type = ObjectType.ELEVATOR_BUTTON
+            res_obj_type = ObjectType.ALL
         elif class_index == 11:
             res_obj_type = ObjectType.SUBWAY_TICKET_GATE_EACH
         elif class_index == 12:
-            res_obj_type = ObjectType.SUBWAY_TICKET_GATE_HANDICAP
+            # res_obj_type = ObjectType.SUBWAY_TICKET_GATE_HANDICAP
+            res_obj_type = ObjectType.SUBWAY_TICKET_GATE_EACH
         elif class_index == 13:
-            res_obj_type = ObjectType.SUBWAY_TICKET_GATE_ALL
+            # res_obj_type = ObjectType.SUBWAY_TICKET_GATE_ALL
+            res_obj_type = ObjectType.SUBWAY_TICKET_GATE_EACH
         elif class_index == 14:
             res_obj_type = ObjectType.SUBWAY_SCREEN_DOOR
 
@@ -587,42 +606,43 @@ class GDHService(Node):
 
                 obj_type, obj_status = self.det_result_to_gdi_code(cls)
 
-                if self.check_door_status and obj_type == ObjectType.ELEVATOR_DOOR:
-                    matched_elevator_id = self.match_existing_elevator(idx, box_xywh)
-                    if matched_elevator_id:
-                        elevator_id = matched_elevator_id
+                if obj_type != ObjectType.ALL:
+                    if self.check_door_status and obj_type == ObjectType.ELEVATOR_DOOR:
+                        matched_elevator_id = self.match_existing_elevator(idx, box_xywh)
+                        if matched_elevator_id:
+                            elevator_id = matched_elevator_id
+                        else:
+                            elevator_id = f"elevator_{len(self.elevator_bboxes) + 1}"
+                            self.elevator_depth_buffers[elevator_id] = []
+
+                        depth_buffer = self.elevator_depth_buffers[elevator_id]
+                        if self.is_door_open(list_np_depth_imgs[idx], box_xywh, depth_buffer, depth_change_threshold=0.2):
+                            obj_status = ObjectStatus.OPEN
+                        else:
+                            obj_status = ObjectStatus.CLOSED
+                        self.get_logger().info(f'detected elevators: {obj_status}')
+
+                        # Update the bounding box and last seen time
+                        self.elevator_bboxes[elevator_id] = [idx, box_xywh]
+                        self.elevator_bboxes_info[elevator_id] = [idx, cam_id, img_w, img_h, htheta_rad, vtheta_rad, hfov_rad, vfov_rad]
+
+                        self.elevator_last_seen[elevator_id] = self.get_clock().now()
+                        detected_elevator_ids.add(elevator_id)
                     else:
-                        elevator_id = f"elevator_{len(self.elevator_bboxes) + 1}"
-                        self.elevator_depth_buffers[elevator_id] = []
+                        elevator_id = None
 
-                    depth_buffer = self.elevator_depth_buffers[elevator_id]
-                    if self.is_door_open(list_np_depth_imgs[idx], box_xywh, depth_buffer, depth_change_threshold=0.2):
-                        obj_status = ObjectStatus.OPEN
-                    else:
-                        obj_status = ObjectStatus.CLOSED
-                    self.get_logger().info(f'detected elevators: {obj_status}')
-
-                    # Update the bounding box and last seen time
-                    self.elevator_bboxes[elevator_id] = [idx, box_xywh]
-                    self.elevator_bboxes_info[elevator_id] = [idx, cam_id, img_w, img_h, htheta_rad, vtheta_rad, hfov_rad, vfov_rad]
-
-                    self.elevator_last_seen[elevator_id] = self.get_clock().now()
-                    detected_elevator_ids.add(elevator_id)
-                else:
-                    elevator_id = None
-
-                if conf >= self.yolo_conf_threshold:
-                    box2d = BoundingBox2D(center=Pose2D(position=Point2D(x=box_xywh[0], y=box_xywh[1]), 
-                                                        theta=float(0.0)), 
-                                            size_x=box_xywh[2], size_y=box_xywh[3])
-                    det_res = GDHDetection2DExt(header=dets_msg.header, bbox=box2d, 
-                                                obj_type=obj_type, obj_status=obj_status,
-                                                cam_id=cam_id, img_w=img_w, img_h=img_h, 
-                                                htheta=htheta_rad, vtheta=vtheta_rad, 
-                                                hfov=hfov_rad, vfov=vfov_rad
-                                                )
-                    # std_msgs/Header header
-                    dets_msg.detections.append(det_res)
+                    if conf >= self.yolo_conf_threshold:
+                        box2d = BoundingBox2D(center=Pose2D(position=Point2D(x=box_xywh[0], y=box_xywh[1]), 
+                                                            theta=float(0.0)), 
+                                                size_x=box_xywh[2], size_y=box_xywh[3])
+                        det_res = GDHDetection2DExt(header=dets_msg.header, bbox=box2d, 
+                                                    obj_type=obj_type, obj_status=obj_status,
+                                                    cam_id=cam_id, img_w=img_w, img_h=img_h, 
+                                                    htheta=htheta_rad, vtheta=vtheta_rad, 
+                                                    hfov=hfov_rad, vfov=vfov_rad
+                                                    )
+                        # std_msgs/Header header
+                        dets_msg.detections.append(det_res)
 
             # save as numpy
             np_result = result.plot()
@@ -886,6 +906,8 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
+
+
 
     # from transformers import pipeline
     # from PIL import Image

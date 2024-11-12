@@ -1,0 +1,19 @@
+# camera: 'theta_cart'
+camera: 
+  id: "theta_rbq3"
+  htheta_list:
+    - 90
+    - 180
+    - -90
+  hfov: 90
+
+yolo_model:
+  conf_threshold: 0.75
+  repo: "models/gd_demo/train958/weights/best.pt"
+
+elevator_door_status:
+  do_check: False
+  depth_repo: "depth-anything/Depth-Anything-V2-Small-hf"
+
+misc:
+  draw_gp: False

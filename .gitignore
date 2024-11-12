@@ -29,3 +29,4 @@ src/gdh_speech_audio/gdh_speech_audio/vito_stt_client_pb2.py
 src/gdh_speech_audio/gdh_speech_audio/vito_stt_client_pb2_grpc.py
 src/gdh_speech_audio/gdh_speech_audio/vito-stt-client.proto
 sample_images/
+gdh.code-workspace
