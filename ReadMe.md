@@ -87,6 +87,12 @@ GDH (GuideDog HRI) module packages
     import gdh_speech_audio.vito_stt_client_pb2 as vito__stt__client__pb2
     ```
 
+- pyaudio 설치
+    ```
+    sudo apt install portaudio19-dev
+    pip3 install pyaudio
+    ```
+
 - Download gd_ifc_pkg (interfaces for all gd modules) from [github](https://github.com/GuideDog-ETRI/gd_ifc_pkg).
     ```bash
     cd src
@@ -108,6 +114,11 @@ GDH (GuideDog HRI) module packages
     ```bash
     pip install ultralytics
     pip install numpy==1.25.0
+    ```
+
+- To use depth estimation
+    ```bash
+    pip install transformers
     ```
 
 - Download [Yolo models](https://drive.google.com/drive/folders/1DFF6rFE7NYYMgBKvXmN59T1wD3KD05Tb?usp=sharing) and place in the folder /models.
@@ -217,13 +228,45 @@ GDH (GuideDog HRI) module packages
     sudo apt-get install ros-humble-grid-map-msgs ros-humble-vision-msgs
     ```
 
-- pyaudio 설치시 에러
+- OSError: Invalid sample rate
+    1. pulseaudio 설치    
     ```
-    sudo apt install portaudio19-dev
-    pip3 install pyaudio
+    sudo apt-get install pulseaudio
+    sudo apt-get install pulseaudio-module-bluetooth
     ```
 
-- 사운드 카드 미인식 혹은 설정 오류
+    2. pulseaudio 데몬 실행 (optional)
+    ```
+    pulseaudio --start
+    ```
+
+    3. ~/.asoundrc 파일 생성 혹은 변경
+    ```
+    pcm.!default {
+        type pulse
+    }
+
+    ctl.!default {
+        type pulse
+    }
+    ```
+
+    4. docker run 코드에 다음 추가
+    ```
+    docker run -it --rm \
+        -e PULSE_SERVER=unix:${XDG_RUNTIME_DIR}/pulse/native \
+        -v ${XDG_RUNTIME_DIR}/pulse/native:${XDG_RUNTIME_DIR}/pulse/native \
+        -v ~/.config/pulse/cookie:/root/.config/pulse/cookie \
+        your-docker-image
+    ```
+
+- 마이크 볼륨 컨트롤러가 안보이면,
+    ```
+    sudo apt install pavucontrol
+    ```
+ 
+
+<!-- - 사운드 카드 미인식 혹은 설정 오류
     ```
     ALSA lib confmisc.c:855:(parse_card) cannot find card '0'
     ALSA lib conf.c:5178:(_snd_config_evaluate) function snd_func_card_inum returned error: No such file or directory
@@ -232,44 +275,4 @@ GDH (GuideDog HRI) module packages
     아래 명령으로 사운드카드 인식상태 확인
     ```
     aplay -l
-    ```
-
-- 마이크 볼륨 컨트롤러가 안보이면,
-    ```
-    sudo apt install pavucontrol
-    ```
-
-<!-- - 다음과 같은 에러를 만나면,
-    ```
-    ALSA lib pcm_dmix.c:1032:(snd_pcm_dmix_open) unable to open slave
-    ALSA lib pcm.c:2664:(snd_pcm_open_noupdate) Unknown PCM cards.pcm.rear
-    ALSA lib pcm.c:2664:(snd_pcm_open_noupdate) Unknown PCM cards.pcm.center_lfe
-    ALSA lib pcm.c:2664:(snd_pcm_open_noupdate) Unknown PCM cards.pcm.side
-    ALSA lib pcm_oss.c:397:(_snd_pcm_oss_open) Cannot open device /dev/dsp
-    ALSA lib pcm_oss.c:397:(_snd_pcm_oss_open) Cannot open device /dev/dsp
-    ALSA lib confmisc.c:160:(snd_config_get_card) Invalid field card
-    ALSA lib pcm_usb_stream.c:482:(_snd_pcm_usb_stream_open) Invalid card 'card'
-    ALSA lib confmisc.c:160:(snd_config_get_card) Invalid field card
-    ALSA lib pcm_usb_stream.c:482:(_snd_pcm_usb_stream_open) Invalid card 'card'
-    ALSA lib pcm_dmix.c:1032:(snd_pcm_dmix_open) unable to open slave
-    ```
-    먼저 현재 재생가능한 오디오와 마이크의 card와 device 번호 획득 
-    ```bash
-    aplay -l
-    arecord -l
-    ```
-    얻어진 정보로 ~/.asoundrc 파일 설정 (ex: 오디오 card 0, device 1, 마이크 card 2, device 3)
-    ```
-    pcm.!default {
-        type hw
-        card 0
-        device 1
-    }
-
-    ctl.!default {
-        type hw
-        card 2
-        device 3
-    }
-
     ``` -->
