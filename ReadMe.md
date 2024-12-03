@@ -41,14 +41,8 @@ GDH (GuideDog HRI) module packages
     ```
 
 ## 2.2. GDH packages
-- Assume all module is installed in conda env 'use_gopro'
+- Move to the workspace folder (assume its as ~/Desktop/gdh)
     ```bash
-    conda activate use_gopro
-    ```
-
-- Make a workspace
-    ```bash
-    mkdir ~/Desktop/gdh
     cd ~/Desktop/gdh
     ```
 
@@ -61,6 +55,16 @@ GDH (GuideDog HRI) module packages
     ```bash
     pip install pygame
     pip install openai
+    ```
+
+- If you have a tensorflow, we may meet un error related to tensorflow version, run below, first.
+    ```
+    pip uninstall tensorflow
+    ```
+
+- Check python command is runable. If not, then.
+    ```
+    alias python=python3
     ```
 
 - To use STT of [ReturnZero](https://www.rtzr.ai/stt)
@@ -79,6 +83,9 @@ GDH (GuideDog HRI) module packages
     pip install grpcio
     pip install requests
     ```
+
+    Check 3 files with starting vito~ are generated in src/gdh_speech_audio/gdh_speech_audio.
+
     ```bash
     cd ../../..
     ```
@@ -110,8 +117,9 @@ GDH (GuideDog HRI) module packages
     cd ..
     ```
 
-- To use yolo-v8
+- To use yolo-v8 and rectify erp images
     ```bash
+    pip install py360convert
     pip install ultralytics
     pip install numpy==1.25.0
     ```
@@ -264,6 +272,22 @@ GDH (GuideDog HRI) module packages
     ```
     sudo apt install pavucontrol
     ```
+
+- 현재 orin에서 동작하는 버전
+    protobuf==5.28.1
+    transformers=4.46.0
+    tensorflow 미설치
+
+- protobuf의 msg를 못읽는다는 에러라면,
+    gdh_speech_audio/__init__.py의 1~2줄에 다음 삽입
+    ```
+    import os
+    os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
+    ```
+
+- NVIDIA Orin에서 설치시에 블루투스 동작에서 문제가 발생하는데 이와 관련된 해결책은 아래와 같음
+    * [명령어 업데이트 방식](https://forums.developer.nvidia.com/t/nvidia-jetson-xavier-nx-bluetooth-connection-issue/156351/31) -> 시도했지만 해결 안됨
+    * [Jetpack update 방식](https://forums.developer.nvidia.com/t/bluetooth-connectivity-issues-with-jetson-orin-nano/290484)
  
 
 <!-- - 사운드 카드 미인식 혹은 설정 오류
