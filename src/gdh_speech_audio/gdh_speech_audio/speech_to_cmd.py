@@ -14,6 +14,7 @@ import pyaudio
 import gdh_speech_audio.vito_stt_client_pb2 as pb
 import gdh_speech_audio.vito_stt_client_pb2_grpc as pb_grpc
 from requests import Session
+import pygame
 
 from .key_wallet import STT_CLIENT_ID, STT_CLIENT_SECRET
 
@@ -32,6 +33,7 @@ class SpeechToTextClient:
         self.client_secret = client_secret
         self._sess = Session()
         self._token = None
+        self.stream = None
 
     @property
     def token(self):
@@ -44,14 +46,15 @@ class SpeechToTextClient:
             self._token = resp.json()
         return self._token["access_token"]
 
-    def transcribe_streaming_grpc(self, config):
-        audio = pyaudio.PyAudio()
-        stream = audio.open(format=pyaudio.paInt16,
-                            channels=1,
-                            rate=STT_SAMPLE_RATE,
-                            input=True,
-                            frames_per_buffer=DEFAULT_BUFFER_SIZE)
+    def transcribe_streaming_grpc(self, config):        
         try:
+            audio = pyaudio.PyAudio()
+            self.stream = audio.open(format=pyaudio.paInt16,
+                                channels=1,
+                                rate=STT_SAMPLE_RATE,
+                                input=True,
+                                frames_per_buffer=DEFAULT_BUFFER_SIZE)
+        
             with grpc.secure_channel(STT_GRPC_SERVER_URL, credentials=grpc.ssl_channel_credentials()) as channel:
                 stub = pb_grpc.OnlineDecoderStub(channel)
                 cred = grpc.access_token_call_credentials(self.token)
@@ -65,7 +68,7 @@ class SpeechToTextClient:
                         yield pb.DecoderRequest(audio_content=buff)
 
                 print("Start speaking...")
-                req_iter = req_iterator(stream)
+                req_iter = req_iterator(self.stream)
                 resp_iter = stub.Decode(req_iter, credentials=cred)
 
                 for resp in resp_iter:
@@ -74,9 +77,12 @@ class SpeechToTextClient:
                             stt_res = res.alternatives[0].text
                             print("[stt] res: {}".format(stt_res))
                             return stt_res
+        except Exception as e:
+            self.get_logger().error(f"Error in PyAudio: {e}")
         finally:
-            stream.stop_stream()
-            stream.close()
+            if self.stream:
+                self.stream.stop_stream()
+                self.stream.close()
             audio.terminate()
 
 
@@ -98,6 +104,19 @@ class SpeechToCmd(Node):
             use_profanity_filter=False,
         )
         self.listen_and_pub_msg()
+
+    # TTS
+    def play_audio(self, filepath):
+        try:
+            pygame.mixer.init()
+            pygame.mixer.music.load(filepath)
+            pygame.mixer.music.play()
+            while pygame.mixer.music.get_busy():
+                continue
+        except pygame.error as e:
+            self.get_logger().error(f"Failed to play audio: {e}")
+        finally:
+            pygame.mixer.quit()  # Release device
    
     # STT
     def load_commands(self, path):
@@ -123,52 +142,43 @@ class SpeechToCmd(Node):
     def listen_and_pub_msg(self):
         msg = UserCommand()
 
-        while rclpy.ok():       # if connected to STT server
+        while rclpy.ok():  # Node가 실행 중일 때
             try:
-                msg.usr_cmd = 255        ## Need None command
-                msg.cmd_param = msg.NONE
-
-                self.get_logger().info(f'Start recording and STT!')
+                # Start recording 알림음
+                self.play_audio('models/temp/start_recording.ogg')
+                self.get_logger().info(f"Start recording and STT!")
                 stt_result_w_space = self.stt_client.transcribe_streaming_grpc(self.config)
-                stt_result = stt_result_w_space.replace(" ", "")        # remove all space
-                self.get_logger().info(f'Stop recording, Receiving a result from STT!: {stt_result}')
+                if not stt_result_w_space:
+                    self.get_logger().error("No result from STT.")
+                    continue
+
+                stt_result = stt_result_w_space.replace(" ", "")  # 공백 제거
+
+                # Stop recording 알림음
+                self.play_audio('models/temp/stop_recording.ogg')
+                self.get_logger().info(f"Stop recording, Receiving a result from STT!: {stt_result}")
 
                 if stt_result in self.commands.keys():
                     usr_cmd_str = self.commands[stt_result]['usr_cmd']
                     cmd_param_str = self.commands[stt_result]['cmd_param']
 
-                    self.get_logger().info(f'Matched command: {stt_result}')
+                    self.get_logger().info(f"Matched command: {stt_result}")
+                    self.play_audio('models/temp/recognized.ogg')
 
                     try:
-                        msg.usr_cmd = getattr(UserCommand, usr_cmd_str)
-                        msg.cmd_param = getattr(UserCommand, cmd_param_str)
+                        msg.usr_cmd = getattr(UserCommand, usr_cmd_str, UserCommand.NONE)
+                        msg.cmd_param = getattr(UserCommand, cmd_param_str, UserCommand.NONE)
 
                         self.publisher_cmd.publish(msg)
-                        self.get_logger().info(f'SpeechToCommand Publishing: {msg.usr_cmd}, {msg.cmd_param}')
-                    except AttributeError:
-                        self.get_logger().error(f'AttributeError: ({usr_cmd_str}), ({cmd_param_str})')
-
-                    # self.future = self.cli_guide_assist.call_async(self.req)
-                    
-                    # while rclpy.ok():
-                    #     rclpy.spin_once(self)
-                    #     if self.future.done():
-                    #         try:
-                    #             response = self.future.result()
-                    #         except Exception as e:
-                    #             self.get_logger().info(f'Service call failed: {e}')
-                    #         else:
-                    #             if response.success:
-                    #                 self.get_logger().info(f'Received response: {response.message}')
-                    #             else:
-                    #                 self.get_logger().info(f'No matching command found.')
-                    #         break
+                        self.get_logger().info(f"SpeechToCommand Publishing: {msg.usr_cmd}, {msg.cmd_param}")
+                    except AttributeError as e:
+                        self.get_logger().error(f"AttributeError: {e}")
                 else:
-                    self.get_logger().info(f'No matched command for: {stt_result}')
+                    self.get_logger().info(f"No matched command for: {stt_result}")
             except grpc.RpcError as e:
-                self.get_logger().error(f'gRPC error: {e}')
+                self.get_logger().error(f"gRPC error: {e}")
             except Exception as e:
-                self.get_logger().error(f'Error during STT processing: {e}')
+                self.get_logger().error(f"Error during STT processing: {e}")
                 self.get_logger().error(traceback.format_exc())
 
 
