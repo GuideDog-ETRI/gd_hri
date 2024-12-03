@@ -129,7 +129,7 @@ GDH (GuideDog HRI) module packages
     pip install transformers
     ```
 
-- Download [Yolo models](https://drive.google.com/drive/folders/1DFF6rFE7NYYMgBKvXmN59T1wD3KD05Tb?usp=sharing) and place in the folder /models.
+- Download Yolo models from [Google drive](https://drive.google.com/drive/folders/1DFF6rFE7NYYMgBKvXmN59T1wD3KD05Tb?usp=sharing) or [GD Server](\\129.254.81.123\GuideDog_NAS\50_DB\gdh_src\models) and place in the folder /models.
 
 - Create /src/gdh_speech_audio/gdh_speech_audio/key_wallet.py file.
 

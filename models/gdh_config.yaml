@@ -9,7 +9,9 @@ camera:
 
 yolo_model:
   conf_threshold: 0.75
-  repo: "models/gd_demo/train958/weights/best.pt"
+  repo: "models/gd_demo/train972_yolov8x/weights/best.pt"
+  resize_long_px: 1000
+  # repo: "models/gd_demo/train958/weights/best.pt"
 
 elevator_door_status:
   do_check: False
@@ -17,3 +19,7 @@ elevator_door_status:
 
 misc:
   draw_gp: False
+
+debug:
+  display_yolo: True
+  display_cmd_list: False
