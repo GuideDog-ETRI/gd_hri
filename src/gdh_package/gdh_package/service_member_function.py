@@ -134,9 +134,12 @@ class GDHService(Node):
         self.yolo_model = None
         self.yolo_conf_threshold = conf['yolo_model']['conf_threshold']
         self.yolo_repo = conf['yolo_model']['repo']
+        self.resize_long_px = conf['yolo_model']['resize_long_px']
 
 
         self.testing_w_GDG = conf['misc']['draw_gp']
+
+        self.debug_display_yolo = conf['debug']['display_yolo']
 
         # heartbeat status - yochin: temporary disabled to test scenario
         self.heartbeats_det_errcode = GDHStatus.ERR_NONE  # 오류 없음
@@ -566,7 +569,8 @@ class GDHService(Node):
             self.service_available = False  # 서비스 사용 가능 여부를 추적
 
         # run yolo
-        results = self.yolo_model.predict(source=list_imgs)
+        results = self.yolo_model.predict(source=list_imgs,
+                                          imgsz=self.resize_long_px)
 
         list_np_depth_imgs = []
         if self.check_door_status:
@@ -785,8 +789,7 @@ class GDHService(Node):
             response.message = 'Detection is not running.'
 
         return response
-    
-    
+        
     def detect_loop(self):
         sleep_duration = 0.01  # 100Hz를 위한 0.01초 슬립
         target_object_types = self.detect_object_types
@@ -802,13 +805,6 @@ class GDHService(Node):
                 dets_msg.header = header
                 dets_msg.detections = []
                 
-                # get image from predefined cameras
-                # res, list_imgs = self.get_rectified_ricoh_images(
-                #     htheta_list=self.htheta_list, 
-                #     vtheta_list=self.vtheta_list,
-                #     hfov=self.hfov, 
-                #     vfov=self.vfov
-                # )
                 res, list_imgs = self.get_images(
                     htheta_list=self.htheta_list, 
                     vtheta_list=self.vtheta_list,
@@ -858,9 +854,17 @@ class GDHService(Node):
                         )
                     )
                 else:
+                    # 이미지를 받지 못한 경우
                     self.get_logger().info('No image for detection')
                     dets_msg.errcode = dets_msg.ERR_NO_IMAGE
-                    combined_np_img = np.zeros((10, 10, 3), dtype=np.uint8)
+                    
+                    # combined_np_img = np.zeros((10, 10, 3), dtype=np.uint8)
+                    combined_np_img = np.zeros((300, 300, 3), dtype=np.uint8)
+
+                if self.debug_display_yolo:
+                    # cv2.putText(empty_img, 'No image', (50, 150), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                    cv2.imshow('Detection Result', combined_np_img)
+                    cv2.waitKey(1)
 
                 # set heartbeats error code
                 self.heartbeats_det_errcode = dets_msg.errcode
@@ -884,6 +888,8 @@ class GDHService(Node):
         finally:
             # 스레드 종료 시 상태 리셋
             self.get_logger().info('Exiting detect_loop')
+            if self.debug_display_yolo:
+                cv2.destroyAllWindows()
             self.detecting = False
 
         
