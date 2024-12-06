@@ -40,7 +40,11 @@ class GDHNodeMonitor(Node):
         try:
             # 활성 노드 목록 가져오기
             result = subprocess.run(['ros2', 'node', 'list'], capture_output=True, text=True)
-            active_nodes = [f"/{node.strip()}" for node in result.stdout.splitlines()]  # 절대 경로로 변환
+            active_nodes = result.stdout.splitlines()
+
+            # 중복된 '/' 정리
+            active_nodes = [node.lstrip('/') for node in active_nodes]  # 앞의 '//' 제거
+            active_nodes = [f"/{node}" for node in active_nodes]  # 절대 경로 형식으로 통일
 
             current_time = time.time()
             for node_name, restart_command in self.nodes_to_monitor.items():
