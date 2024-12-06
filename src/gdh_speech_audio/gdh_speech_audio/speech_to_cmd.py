@@ -39,6 +39,7 @@ def play_audio(filepath):
 
 class SpeechToTextClient(Node):
     def __init__(self, client_id, client_secret):
+        super().__init__('speech_to_text_client')  # ROS 노드 초기화
         self.client_id = client_id
         self.client_secret = client_secret
         self._sess = Session()
