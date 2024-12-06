@@ -873,7 +873,8 @@ class GDHService(Node):
                 self.get_logger().debug('Convert np to ros image')    
                 dets_ros_img = self.numpy_to_ros_image(combined_np_img)
                 
-                self.get_logger().debug('Publish dets_msg and dets_ros_img')
+                self.get_logger().info('Publish dets_msg and dets_ros_img')
+                self.get_logger().info(f'{dets_msg}')
                 self.publisher_detect.publish(dets_msg)
                 self.publisher_detect_img.publish(dets_ros_img)
 
