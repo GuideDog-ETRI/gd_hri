@@ -28,4 +28,4 @@ debug:
   display_cmd_list: False
 
 node_monitor:
-  freq_sec: 2.0
+  freq_sec: 4.0
