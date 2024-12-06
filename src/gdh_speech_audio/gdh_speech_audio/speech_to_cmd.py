@@ -78,7 +78,7 @@ class SpeechToTextClient:
                             print("[stt] res: {}".format(stt_res))
                             return stt_res
         except Exception as e:
-            self.get_logger().error(f"Error in PyAudio: {e}")
+            print(f"Error in PyAudio: {e}")
         finally:
             if self.stream:
                 self.stream.stop_stream()
@@ -91,7 +91,6 @@ class SpeechToCmd(Node):
         super().__init__('speech_to_cmd')     # node_name
 
         self.commands = self.load_commands('models/audio_cmd_list.txt')
-
         self.publisher_cmd = self.create_publisher(UserCommand, '/GDH_user_cmd', 1)
         
         # STT
@@ -177,8 +176,10 @@ class SpeechToCmd(Node):
                 else:
                     self.get_logger().info(f"No matched command for: {stt_result}")
             except grpc.RpcError as e:
+                # self.play_audio('models/temp/no_net_connection.mp3')
                 self.get_logger().error(f"gRPC error: {e}")
             except Exception as e:
+                # self.play_audio('models/temp/no_net_connection.mp3')
                 self.get_logger().error(f"Error during STT processing: {e}")
                 self.get_logger().error(traceback.format_exc())
 
