@@ -102,6 +102,7 @@ class SpeechToCmd(Node):
             use_itn=True,
             use_disfluency_filter=False,
             use_profanity_filter=False,
+            keywords=self.commands.keys()
         )
         self.listen_and_pub_msg()
 
