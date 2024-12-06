@@ -27,7 +27,11 @@ class GDHNodeMonitor(Node):
 
         # 일정 주기마다 상태 확인
         freq_sec = float(conf['node_monitor']['freq_sec'])
+        self.node_wait_sec = float(conf['node_monitor']['node_wait_sec'])
         self.timer = self.create_timer(freq_sec, self.check_and_restart_nodes)
+
+        # 노드 상태 기록 (노드 재시작 시간 기록)
+        self.node_restart_times = {node_name: 0 for node_name in self.nodes_to_monitor}
 
     def check_and_restart_nodes(self):
         try:
@@ -35,11 +39,18 @@ class GDHNodeMonitor(Node):
             result = subprocess.run(['ros2', 'node', 'list'], capture_output=True, text=True)
             active_nodes = result.stdout.splitlines()
 
+            current_time = time.time()
             for node_name, restart_command in self.nodes_to_monitor.items():
                 # 노드가 활성화되어 있는지 확인
                 if node_name not in active_nodes:
-                    self.get_logger().warn(f"Node '{node_name}' is not running! Restarting...")
-                    self.restart_node(node_name, restart_command)
+                    # 재시작 간격 확인 (5초 이상 지나야 재시작 가능)
+                    last_restart = self.node_restart_times[node_name]
+                    if current_time - last_restart > self.node_wait_sec:  # 5초 대기
+                        self.get_logger().warn(f"Node '{node_name}' is not running! Restarting...")
+                        self.restart_node(node_name, restart_command)
+                        self.node_restart_times[node_name] = current_time  # 재시작 시간 업데이트
+                    else:
+                        self.get_logger().info(f"Node '{node_name}' recently restarted. Waiting...")
                 else:
                     pass
                     # self.get_logger().info(f"Node '{node_name}' is running.")
@@ -50,9 +61,11 @@ class GDHNodeMonitor(Node):
         try:
             # 노드 재시작 명령 실행
             subprocess.Popen(restart_command, shell=True)
-            self.get_logger().info(f"Node '{node_name}' restarted successfully.")
+            self.get_logger().info(f"Node '{node_name}' restarted successfully. Waiting for stabilization...")
+            time.sleep(self.node_wait_sec)  # 노드 안정화 대기 시간 (필요에 따라 조정)
         except Exception as e:
             self.get_logger().error(f"Failed to restart node '{node_name}': {e}")
+
 
 
 def main(args=None):

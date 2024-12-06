@@ -29,3 +29,4 @@ debug:
 
 node_monitor:
   freq_sec: 4.0
+  node_wait_sec: 4.0
