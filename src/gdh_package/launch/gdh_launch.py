@@ -3,11 +3,11 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     return LaunchDescription([
-        Node(
-            package='gdh_package',
-            executable='service',
-            name='service_member_function'
-        ),
+        # Node(
+        #     package='gdh_package',
+        #     executable='service',
+        #     name='service_member_function'
+        # ),
         # Node(
         #     package='gdh_package',
         #     executable='client_det_init',

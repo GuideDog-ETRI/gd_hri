@@ -28,5 +28,5 @@ debug:
   display_cmd_list: False
 
 node_monitor:
-  freq_sec: 4.0
-  node_wait_sec: 4.0
+  freq_sec: 5.0
+  node_wait_sec: 10.0
