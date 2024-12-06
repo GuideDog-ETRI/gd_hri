@@ -26,8 +26,18 @@ STT_GRPC_SERVER_URL = "grpc-openapi.vito.ai:443"
 STT_SAMPLE_RATE = 8000
 STT_ENCODING = pb.DecoderConfig.AudioEncoding.LINEAR16
 
+# TTS
+def play_audio(filepath):
+    try:
+        pygame.mixer.init()
+        pygame.mixer.music.load(filepath)
+        pygame.mixer.music.play()
+        while pygame.mixer.music.get_busy():
+            continue
+    finally:
+        pygame.mixer.quit()  # Release device
 
-class SpeechToTextClient:
+class SpeechToTextClient(Node):
     def __init__(self, client_id, client_secret):
         self.client_id = client_id
         self.client_secret = client_secret
@@ -77,8 +87,11 @@ class SpeechToTextClient:
                             stt_res = res.alternatives[0].text
                             print("[stt] res: {}".format(stt_res))
                             return stt_res
+        except grpc.RpcError as e:
+            play_audio('models/temp/no_net_connection.mp3')
+            self.get_logger().error(f"gRPC error: {e}")
         except Exception as e:
-            print(f"Error in PyAudio: {e}")
+            self.get_logger().error(f"Error in PyAudio: {e}")
         finally:
             if self.stream:
                 self.stream.stop_stream()
@@ -105,19 +118,6 @@ class SpeechToCmd(Node):
         )
         self.listen_and_pub_msg()
 
-    # TTS
-    def play_audio(self, filepath):
-        try:
-            pygame.mixer.init()
-            pygame.mixer.music.load(filepath)
-            pygame.mixer.music.play()
-            while pygame.mixer.music.get_busy():
-                continue
-        except pygame.error as e:
-            self.get_logger().error(f"Failed to play audio: {e}")
-        finally:
-            pygame.mixer.quit()  # Release device
-   
     # STT
     def load_commands(self, path):
         with open(path, 'r') as file:
@@ -145,7 +145,7 @@ class SpeechToCmd(Node):
         while rclpy.ok():  # Node가 실행 중일 때
             try:
                 # Start recording 알림음
-                self.play_audio('models/temp/start_recording.ogg')
+                play_audio('models/temp/start_recording.ogg')
                 self.get_logger().info(f"Start recording and STT!")
                 stt_result_w_space = self.stt_client.transcribe_streaming_grpc(self.config)
                 if not stt_result_w_space:
@@ -155,7 +155,7 @@ class SpeechToCmd(Node):
                 stt_result = stt_result_w_space.replace(" ", "")  # 공백 제거
 
                 # Stop recording 알림음
-                self.play_audio('models/temp/stop_recording.ogg')
+                play_audio('models/temp/stop_recording.ogg')
                 self.get_logger().info(f"Stop recording, Receiving a result from STT!: {stt_result}")
 
                 if stt_result in self.commands.keys():
@@ -163,7 +163,7 @@ class SpeechToCmd(Node):
                     cmd_param_str = self.commands[stt_result]['cmd_param']
 
                     self.get_logger().info(f"Matched command: {stt_result}")
-                    self.play_audio('models/temp/recognized.ogg')
+                    play_audio('models/temp/recognized.ogg')
 
                     try:
                         msg.usr_cmd = getattr(UserCommand, usr_cmd_str, UserCommand.NONE)
@@ -176,10 +176,10 @@ class SpeechToCmd(Node):
                 else:
                     self.get_logger().info(f"No matched command for: {stt_result}")
             except grpc.RpcError as e:
-                # self.play_audio('models/temp/no_net_connection.mp3')
+                # play_audio('models/temp/no_net_connection.mp3')
                 self.get_logger().error(f"gRPC error: {e}")
             except Exception as e:
-                # self.play_audio('models/temp/no_net_connection.mp3')
+                # play_audio('models/temp/no_net_connection.mp3')
                 self.get_logger().error(f"Error during STT processing: {e}")
                 self.get_logger().error(traceback.format_exc())
 
