@@ -22,7 +22,7 @@ class GDHNodeMonitor(Node):
         # 감시할 노드 정보: {노드 이름: 재시작 명령어}
         self.nodes_to_monitor = {
             '/msg_to_audio': 'ros2 run gdh_speech_audio srv_play_audio_from_msg',
-            '/speech_to_cmd': 'ros2 run gdh_speech_audio pub_command_from_speech',
+#            '/speech_to_cmd': 'ros2 run gdh_speech_audio pub_command_from_speech',
         }
 
         # 일정 주기마다 상태 확인
@@ -40,7 +40,7 @@ class GDHNodeMonitor(Node):
         try:
             # 활성 노드 목록 가져오기
             result = subprocess.run(['ros2', 'node', 'list'], capture_output=True, text=True)
-            active_nodes = result.stdout.splitlines()
+            active_nodes = [f"/{node.strip()}" for node in result.stdout.splitlines()]  # 절대 경로로 변환
 
             current_time = time.time()
             for node_name, restart_command in self.nodes_to_monitor.items():
@@ -55,8 +55,7 @@ class GDHNodeMonitor(Node):
                     else:
                         self.get_logger().info(f"Node '{node_name}' recently restarted. Waiting...")
                 else:
-                    pass
-                    # self.get_logger().info(f"Node '{node_name}' is running.")
+                    self.get_logger().info(f"Node '{node_name}' is running.")
         except Exception as e:
             self.get_logger().error(f"Error while checking node status: {e}")
 
