@@ -21,8 +21,8 @@ class GDHNodeMonitor(Node):
 
         # 감시할 노드 정보: {노드 이름: 재시작 명령어}
         self.nodes_to_monitor = {
-            '/msg_to_audio': 'ros2 run gdh_speech_audio srv_play_audio_from_msg',
-            '/speech_to_cmd': 'ros2 run gdh_speech_audio pub_command_from_speech',
+            'msg_to_audio': 'ros2 run gdh_speech_audio srv_play_audio_from_msg',
+            'speech_to_cmd': 'ros2 run gdh_speech_audio pub_command_from_speech',
         }
 
         # 일정 주기마다 상태 확인
@@ -30,7 +30,7 @@ class GDHNodeMonitor(Node):
         self.node_wait_sec = float(conf['node_monitor']['node_wait_sec'])
 
         time.sleep(self.node_wait_sec)  # 노드 안정화 대기 시간 (필요에 따라 조정)
-        
+
         self.timer = self.create_timer(freq_sec, self.check_and_restart_nodes)
 
         # 노드 상태 기록 (노드 재시작 시간 기록)
