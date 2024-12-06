@@ -58,12 +58,14 @@ class SpeechToTextClient(Node):
 
     def transcribe_streaming_grpc(self, config):        
         try:
+            self.get_logger().info(f"Starting transcribe_streaming_grpc")
             audio = pyaudio.PyAudio()
             self.stream = audio.open(format=pyaudio.paInt16,
                                 channels=1,
                                 rate=STT_SAMPLE_RATE,
                                 input=True,
                                 frames_per_buffer=DEFAULT_BUFFER_SIZE)
+            self.get_logger().info(f"stream open")
         
             with grpc.secure_channel(STT_GRPC_SERVER_URL, credentials=grpc.ssl_channel_credentials()) as channel:
                 stub = pb_grpc.OnlineDecoderStub(channel)
@@ -77,7 +79,7 @@ class SpeechToTextClient(Node):
                             break
                         yield pb.DecoderRequest(audio_content=buff)
 
-                print("Start speaking...")
+                self.get_logger().info(f"Starting speaking...")
                 req_iter = req_iterator(self.stream)
                 resp_iter = stub.Decode(req_iter, credentials=cred)
 
@@ -93,6 +95,7 @@ class SpeechToTextClient(Node):
         except Exception as e:
             self.get_logger().error(f"Error in PyAudio: {e}")
         finally:
+            self.get_logger().info(f"Final streaming")
             if self.stream:
                 self.stream.stop_stream()
                 self.stream.close()
@@ -142,6 +145,8 @@ class SpeechToCmd(Node):
     def listen_and_pub_msg(self):
         msg = UserCommand()
 
+        self.get_logger().info(f"Start list_and_pub_msg")
+
         while rclpy.ok():  # Node가 실행 중일 때
             try:
                 # Start recording 알림음
@@ -166,11 +171,14 @@ class SpeechToCmd(Node):
                     play_audio('models/temp/recognized.ogg')
 
                     try:
+                        self.get_logger().info(f"Start to pub msg")
                         msg.usr_cmd = getattr(UserCommand, usr_cmd_str, UserCommand.NONE)
                         msg.cmd_param = getattr(UserCommand, cmd_param_str, UserCommand.NONE)
 
+                        self.get_logger().info(f"Msg: {msg}")
+
                         self.publisher_cmd.publish(msg)
-                        self.get_logger().info(f"SpeechToCommand Publishing: {msg.usr_cmd}, {msg.cmd_param}")
+                        self.get_logger().info(f"SpeechToCommand Published: {msg.usr_cmd}, {msg.cmd_param}")
                     except AttributeError as e:
                         self.get_logger().error(f"AttributeError: {e}")
                 else:
@@ -182,6 +190,10 @@ class SpeechToCmd(Node):
                 # play_audio('models/temp/no_net_connection.mp3')
                 self.get_logger().error(f"Error during STT processing: {e}")
                 self.get_logger().error(traceback.format_exc())
+
+            self.get_logger().info(f"End of while")
+
+        self.get_logger().info(f"End of listen_and_pub_msg")
 
 
 def main(args=None):
