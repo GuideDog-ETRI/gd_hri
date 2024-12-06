@@ -25,6 +25,7 @@ setup(
         'console_scripts': [
             'pub_command_from_speech = gdh_speech_audio.speech_to_cmd:main',
             'srv_play_audio_from_msg = gdh_speech_audio.msg_to_audio:main',
+            'gdh_node_monitor = gdh_speech_audio.gdh_node_monitor:main'
         ],
     },
 )

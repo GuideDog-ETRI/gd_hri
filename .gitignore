@@ -47,3 +47,4 @@ src/gdh_speech_audio/gdh_speech_audio/__pycache__/vito_stt_client_pb2_grpc.cpyth
 src/gdh_speech_audio/gdh_speech_audio/__pycache__/vito_stt_client_pb2.cpython-310.pyc
 src/gdh_package/gdh_package/__pycache__/__init__.cpython-310.pyc
 src/gdh_package/gdh_package/__pycache__/service_member_function.cpython-310.pyc
+src/gdh_speech_audio/gdh_speech_audio/__pycache__/gdh_node_monitor.cpython-310.pyc

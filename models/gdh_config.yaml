@@ -1,14 +1,16 @@
 # camera: 'theta_cart'
 camera: 
   id: "theta_rbq3"
+  # htheta_list:
+  #   - 90
+  #   - 180
+  #   - -90
   htheta_list:
-    - 90
     - 180
-    - -90
   hfov: 90
 
 yolo_model:
-  conf_threshold: 0.75
+  conf_threshold: 0.2
   repo: "models/gd_demo/train972_yolov8x/weights/best.pt"
   resize_long_px: 1000
   # repo: "models/gd_demo/train958/weights/best.pt"
@@ -23,3 +25,6 @@ misc:
 debug:
   display_yolo: True
   display_cmd_list: False
+
+node_monitor:
+  freq_sec: 2.0

@@ -12,5 +12,10 @@ def generate_launch_description():
             package='gdh_speech_audio',
             executable='pub_command_from_speech',
             name='speech_to_cmd'
-        ),        
+        ),
+        Node(
+            package='gdh_speech_audio',
+            executable='gdh_node_monitor',
+            name='gdh_node_monitor'
+        ),      
     ])
