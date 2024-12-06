@@ -28,9 +28,6 @@ class GDHNodeMonitor(Node):
         # 일정 주기마다 상태 확인
         freq_sec = float(conf['node_monitor']['freq_sec'])
         self.node_wait_sec = float(conf['node_monitor']['node_wait_sec'])
-
-        time.sleep(self.node_wait_sec)  # 노드 안정화 대기 시간 (필요에 따라 조정)
-        
         self.timer = self.create_timer(freq_sec, self.check_and_restart_nodes)
 
         # 노드 상태 기록 (노드 재시작 시간 기록)
