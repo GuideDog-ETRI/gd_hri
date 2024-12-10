@@ -6,7 +6,7 @@ camera:
   #   - 180
   #   - -90
   htheta_list:
-    - 180
+   - 180
   hfov: 90
 
 yolo_model:
