@@ -833,7 +833,6 @@ class GDHService(Node):
         
     def detect_loop(self):
         sleep_duration = 0.01  # 100Hz를 위한 0.01초 슬립
-        target_object_types = self.detect_object_types
 
         try:
             while not self.shutdown_event.is_set():
@@ -871,12 +870,12 @@ class GDHService(Node):
                             dets_msg, list_imgs, list_img_infos
                         )
 
-                        if target_object_types == self.all_object_type_id:
+                        if self.detect_object_types == self.all_object_type_id:
                             detections_filtered = dets_msg.detections
                         else:
                             detections_filtered = [
                                 item for item in dets_msg.detections 
-                                if int(item.obj_type) in [target_object_types]
+                                if int(item.obj_type) in [self.detect_object_types] and int(item.obj_type) != 254
                             ]
                             
                         dets_msg.detections = detections_filtered
