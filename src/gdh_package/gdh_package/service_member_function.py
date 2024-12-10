@@ -834,90 +834,93 @@ class GDHService(Node):
         target_object_types = self.detect_object_types
 
         try:
-            while self.detecting and not self.shutdown_event.is_set():
-                self.get_logger().debug('Detecting loop start')
-                # dets_msg
-                dets_msg = GDHDetections()
-                header = Header()
-                header.stamp = self.get_clock().now().to_msg()  # 현재 시간
-                header.frame_id = "none"
-                dets_msg.header = header
-                dets_msg.detections = []
-                
-                res, list_imgs = self.get_images(
-                    htheta_list=self.htheta_list, 
-                    vtheta_list=self.vtheta_list,
-                    hfov=self.hfov, 
-                    vfov=self.vfov
-                )
-                if res:
-                    list_img_infos = []
-                    for idx, img in enumerate(list_imgs):
-                        img_infos = {
-                            'cam_id': self.cam_id_ricoh,
-                            'img_w': img.shape[1],
-                            'img_h': img.shape[0],
-                            'htheta': self.htheta_list[idx],
-                            'vtheta': self.vtheta_list[idx],
-                            'hfov': self.hfov,
-                            'vfov': self.vfov
-                        }
-                        list_img_infos.append(img_infos)
-
-                    dets_msg, combined_np_img = self.detect_common_and_draw_gp(
-                        dets_msg, list_imgs, list_img_infos
-                    )
-
-                    if target_object_types == self.all_object_type_id:
-                        detections_filtered = dets_msg.detections
-                    else:
-                        detections_filtered = [
-                            item for item in dets_msg.detections 
-                            if int(item.obj_type) in [target_object_types]
-                        ]
-                        
-                    dets_msg.detections = detections_filtered
-
-                    if len(dets_msg.detections) > 0:
-                        dets_msg.errcode = dets_msg.ERR_NONE_AND_FIND_SUCCESS
-                    else:
-                        dets_msg.errcode = dets_msg.ERR_NONE_AND_FIND_FAILURE
-                
-                    self.get_logger().info(
-                        'Set dets_msg\n\terrcode: %d,  %d(UNKNOWN), %d(FIND_FAIL), %d(FIND_SUCCESS)' % 
-                        (
-                            dets_msg.errcode, 
-                            dets_msg.ERR_UNKNOWN, 
-                            dets_msg.ERR_NONE_AND_FIND_FAILURE, 
-                            dets_msg.ERR_NONE_AND_FIND_SUCCESS
-                        )
-                    )
-                else:
-                    # 이미지를 받지 못한 경우
-                    self.get_logger().info('No image for detection')
-                    dets_msg.errcode = dets_msg.ERR_NO_IMAGE
+            while not self.shutdown_event.is_set():
+                if self.detecting:
+                    self.get_logger().debug('Detecting loop start')
+                    # dets_msg
+                    dets_msg = GDHDetections()
+                    header = Header()
+                    header.stamp = self.get_clock().now().to_msg()  # 현재 시간
+                    header.frame_id = "none"
+                    dets_msg.header = header
+                    dets_msg.detections = []
                     
-                    # combined_np_img = np.zeros((10, 10, 3), dtype=np.uint8)
-                    combined_np_img = np.zeros((300, 300, 3), dtype=np.uint8)
+                    res, list_imgs = self.get_images(
+                        htheta_list=self.htheta_list, 
+                        vtheta_list=self.vtheta_list,
+                        hfov=self.hfov, 
+                        vfov=self.vfov
+                    )
+                    if res:
+                        list_img_infos = []
+                        for idx, img in enumerate(list_imgs):
+                            img_infos = {
+                                'cam_id': self.cam_id_ricoh,
+                                'img_w': img.shape[1],
+                                'img_h': img.shape[0],
+                                'htheta': self.htheta_list[idx],
+                                'vtheta': self.vtheta_list[idx],
+                                'hfov': self.hfov,
+                                'vfov': self.vfov
+                            }
+                            list_img_infos.append(img_infos)
 
-                if self.debug_display_yolo:
-                    # cv2.putText(empty_img, 'No image', (50, 150), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-                    cv2.imshow('Detection Result', combined_np_img)
-                    cv2.waitKey(1)
+                        dets_msg, combined_np_img = self.detect_common_and_draw_gp(
+                            dets_msg, list_imgs, list_img_infos
+                        )
 
-                # set heartbeats error code
-                self.heartbeats_det_errcode = dets_msg.errcode
-                
-                # 결과를 Image 메시지로 변환하여 퍼블리시       
-                self.get_logger().debug('Convert np to ros image')    
-                dets_ros_img = self.numpy_to_ros_image(combined_np_img)
-                
-                self.get_logger().info('Publish dets_msg and dets_ros_img')
-                self.get_logger().info(f'{dets_msg}')
-                self.publisher_detect.publish(dets_msg)
-                self.publisher_detect_img.publish(dets_ros_img)
+                        if target_object_types == self.all_object_type_id:
+                            detections_filtered = dets_msg.detections
+                        else:
+                            detections_filtered = [
+                                item for item in dets_msg.detections 
+                                if int(item.obj_type) in [target_object_types]
+                            ]
+                            
+                        dets_msg.detections = detections_filtered
 
-                self.get_logger().debug('Sleeping for %s seconds' % sleep_duration)
+                        if len(dets_msg.detections) > 0:
+                            dets_msg.errcode = dets_msg.ERR_NONE_AND_FIND_SUCCESS
+                        else:
+                            dets_msg.errcode = dets_msg.ERR_NONE_AND_FIND_FAILURE
+                    
+                        self.get_logger().info(
+                            'Set dets_msg\n\terrcode: %d,  %d(UNKNOWN), %d(FIND_FAIL), %d(FIND_SUCCESS)' % 
+                            (
+                                dets_msg.errcode, 
+                                dets_msg.ERR_UNKNOWN, 
+                                dets_msg.ERR_NONE_AND_FIND_FAILURE, 
+                                dets_msg.ERR_NONE_AND_FIND_SUCCESS
+                            )
+                        )
+                    else:
+                        # 이미지를 받지 못한 경우
+                        self.get_logger().info('No image for detection')
+                        dets_msg.errcode = dets_msg.ERR_NO_IMAGE
+                        
+                        # combined_np_img = np.zeros((10, 10, 3), dtype=np.uint8)
+                        combined_np_img = np.zeros((300, 300, 3), dtype=np.uint8)
+
+                    if self.debug_display_yolo:
+                        # cv2.putText(empty_img, 'No image', (50, 150), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                        cv2.imshow('Detection Result', combined_np_img)
+                        cv2.waitKey(1)
+
+                    # set heartbeats error code
+                    self.heartbeats_det_errcode = dets_msg.errcode
+                    
+                    # 결과를 Image 메시지로 변환하여 퍼블리시       
+                    self.get_logger().debug('Convert np to ros image')    
+                    dets_ros_img = self.numpy_to_ros_image(combined_np_img)
+                    
+                    self.get_logger().info('Publish dets_msg and dets_ros_img')
+                    self.get_logger().info(f'{dets_msg}')
+                    self.publisher_detect.publish(dets_msg)
+                    self.publisher_detect_img.publish(dets_ros_img)
+
+                    self.get_logger().debug('Sleeping for %s seconds' % sleep_duration)
+                else:
+                    pass
                 # 종료 이벤트 또는 슬립 지속 시간을 대기
                 self.shutdown_event.wait(timeout=sleep_duration)
         except Exception as e:
