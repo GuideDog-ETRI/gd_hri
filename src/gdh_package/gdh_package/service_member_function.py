@@ -871,13 +871,10 @@ class GDHService(Node):
                             dets_msg, list_imgs, list_img_infos
                         )
 
-                        if target_object_types == self.ignore_object_type_id:
-                            detections_filtered = []
-                        else:
-                            detections_filtered = [
-                                item for item in dets_msg.detections 
-                                if int(item.obj_type) in [target_object_types]
-                            ]
+                        detections_filtered = [
+                            item for item in dets_msg.detections 
+                            if int(item.obj_type) in [target_object_types]
+                        ]
                             
                         dets_msg.detections = detections_filtered
 
