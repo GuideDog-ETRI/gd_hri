@@ -900,7 +900,7 @@ class GDHService(Node):
                         dets_msg.errcode = dets_msg.ERR_NO_IMAGE
                         
                         # combined_np_img = np.zeros((10, 10, 3), dtype=np.uint8)
-                        combined_np_img = np.zeros((300, 300, 3), dtype=np.uint8)
+                        combined_np_img = np.ones((480, 640, 3), dtype=np.uint8) * 255
 
                     if self.debug_display_yolo:
                         # cv2.putText(empty_img, 'No image', (50, 150), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
@@ -920,7 +920,11 @@ class GDHService(Node):
                     self.publisher_detect_img.publish(dets_ros_img)
                 else:
                     # self.get_logger().info('Passing detect_loop')
-                    cv2.destroyAllWindows()
+                    if self.debug_display_yolo:
+                        # cv2.destroyAllWindows()
+                        black_np_img = np.zeros((480, 640, 3), dtype=np.uint8)
+                        cv2.imshow('Detection Result', black_np_img)
+                        cv2.waitKey(1)
 
                 # 종료 이벤트 또는 슬립 지속 시간을 대기
                 self.get_logger().debug('Sleeping for %s seconds' % sleep_duration)
