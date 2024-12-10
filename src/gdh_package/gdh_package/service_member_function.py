@@ -811,7 +811,7 @@ class GDHService(Node):
             if not self.detecting:
                 self.detect_object_types = request.object_types
                 self.detecting = True
-                
+
                 response.success = True
                 response.message = 'Detection started.'
             else:
@@ -920,7 +920,7 @@ class GDHService(Node):
                     self.publisher_detect.publish(dets_msg)
                     self.publisher_detect_img.publish(dets_ros_img)
                 else:
-                    self.get_logger().info('Passing detect_loop')
+                    # self.get_logger().info('Passing detect_loop')
                     cv2.destroyAllWindows()
 
                 # 종료 이벤트 또는 슬립 지속 시간을 대기
