@@ -53,7 +53,8 @@ class ObjectType(IntEnum):
     # SUBWAY_TICKET_GATE_ALL = c_uint8(82).value
     PEDESTRIAN_TRAFFIC_LIGHT = c_uint8(17).value
     SUBWAY_SCREEN_DOOR = c_uint8(18).value
-    IGNORE = c_uint8(255).value
+    IGNORE = c_uint8(254).value
+    ALL = c_uint8(255).value
 
 class ObjectStatus(IntEnum):
     OPEN = c_uint8(3).value
@@ -62,7 +63,6 @@ class ObjectStatus(IntEnum):
     RED = c_uint8(10).value
     GREEN = c_uint8(11).value
     UNKNOWN = c_uint8(99).value
-
 
 class GDHService(Node):
     def __init__(self):
@@ -132,6 +132,7 @@ class GDHService(Node):
         self.vfov = 70
         
         self.all_object_type_id = 255
+        self.ignore_object_type_id = 254
         self.detect_object_types = self.all_object_type_id
 
         self.yolo_model = None
@@ -871,8 +872,8 @@ class GDHService(Node):
                             dets_msg, list_imgs, list_img_infos
                         )
 
-                        if target_object_types == self.all_object_type_id:
-                            detections_filtered = dets_msg.detections
+                        if target_object_types == self.ignore_object_type_id:
+                            detections_filtered = []
                         else:
                             detections_filtered = [
                                 item for item in dets_msg.detections 
