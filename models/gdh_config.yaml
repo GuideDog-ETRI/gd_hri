@@ -10,7 +10,7 @@ camera:
   hfov: 90
 
 yolo_model:
-  conf_threshold: 0.2
+  conf_threshold: 0.5
   repo: "models/gddemo_v2.1/yolov8x_976_gddemo_v2.1_etri/weights/best.pt"  
   resize_long_px: 1000
   # repo: "models/gd_demo/train958/weights/best.pt"
