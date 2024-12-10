@@ -131,8 +131,8 @@ class GDHService(Node):
         self.hfov = conf['camera']['hfov']
         self.vfov = 70
         
-        self.all_object_type_id = 255
-        self.detect_object_types = self.all_object_type_id
+        self.ignore_object_type_id = 255
+        self.detect_object_types = self.ignore_object_type_id
 
         self.yolo_model = None
         self.yolo_conf_threshold = conf['yolo_model']['conf_threshold']
@@ -871,8 +871,8 @@ class GDHService(Node):
                             dets_msg, list_imgs, list_img_infos
                         )
 
-                        if target_object_types == self.all_object_type_id:
-                            detections_filtered = dets_msg.detections
+                        if target_object_types == self.ignore_object_type_id:
+                            detections_filtered = []
                         else:
                             detections_filtered = [
                                 item for item in dets_msg.detections 
