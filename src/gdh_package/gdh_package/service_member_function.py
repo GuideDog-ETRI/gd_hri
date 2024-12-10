@@ -23,6 +23,9 @@ import cv2
 import threading
 import math
 
+# Yolo-world
+from ultralytics import YOLOWorld
+
 # Heartbeat
 from gd_ifc_pkg.msg import GDHStatus
 from std_msgs.msg import Header
@@ -50,7 +53,7 @@ class ObjectType(IntEnum):
     # SUBWAY_TICKET_GATE_ALL = c_uint8(82).value
     PEDESTRIAN_TRAFFIC_LIGHT = c_uint8(17).value
     SUBWAY_SCREEN_DOOR = c_uint8(18).value
-    ALL = c_uint8(255).value
+    IGNORE = c_uint8(255).value
 
 class ObjectStatus(IntEnum):
     OPEN = c_uint8(3).value
@@ -123,7 +126,7 @@ class GDHService(Node):
         self.cam_id_ricoh = conf['camera']['id']
         # self.htheta_list = [90, 180, -90]  # [-180, 180] in degree, 
         self.htheta_list = conf['camera']['htheta_list']
-        self.vtheta_list = [0, 0, 0]
+        self.vtheta_list = [0] * len(self.htheta_list)
         # self.hfov = 90
         self.hfov = conf['camera']['hfov']
         self.vfov = 70
@@ -135,7 +138,12 @@ class GDHService(Node):
         self.yolo_conf_threshold = conf['yolo_model']['conf_threshold']
         self.yolo_repo = conf['yolo_model']['repo']
         self.resize_long_px = conf['yolo_model']['resize_long_px']
+        self.use_yoloworld = conf['yolo_model']['use_yoloworld']
+        self.yoloworld_repo = conf['yolo_model']['world_repo']
 
+        self.pub_msg_subway_gate_each = conf['pub_msg']['subway_gate_each']
+        self.pub_msg_subway_gate_all = conf['pub_msg']['subway_gate_all']
+        self.pub_msg_subway_gate_handicap = conf['pub_msg']['subway_gate_handicap']
 
         self.testing_w_GDG = conf['misc']['draw_gp']
 
@@ -264,7 +272,7 @@ class GDHService(Node):
                 htheta_for_converter = htheta - 180
 
                 if htheta_for_converter < -180:
-                    htheta_for_converter += 180
+                    htheta_for_converter += 360
 
                 planar_image = self.convert_to_planar(ricohz_erp_image, fov_deg=(hfov, vfov), 
                                                       u_deg=htheta_for_converter, v_deg=vtheta)
@@ -365,10 +373,20 @@ class GDHService(Node):
         # Load a model
         if os.path.exists(self.yolo_repo):
             self.yolo_model = YOLO(self.yolo_repo)
+
+            if self.use_yoloworld:
+                self.yoloworld_model = YOLOWorld(self.yoloworld_repo)
+                self.yoloworld_model.set_classes(["control gate", "access control gate"])
+                self.get_logger().info(f'init_detector: yoloworld_model is loaded from {self.yoloworld_repo}.')
+            else:
+                self.yoloworld_model = None
+                self.get_logger().info(f'init_detector: yoloworld_model is not loaded.')
+
             res = True
             self.get_logger().info(f'init_detector: yolo_model is loaded from {self.yolo_repo}.')
         else:
             self.yolo_model = None
+            self.yoloworld_model = None
             res = False
             self.get_logger().info(f'init_detector: yolo_model is not loaded. Path({self.yolo_repo}) is not exist.')
 
@@ -391,6 +409,11 @@ class GDHService(Node):
             del self.yolo_model
             self.yolo_model = None
             self.get_logger().info('term_detector: yolo_model is unloaded.')
+
+        if self.yoloworld_model is not None:
+            del self.yoloworld_model
+            self.yoloworld_model = None
+            self.get_logger().info('term_detector: yoloworld_model is unloaded.')
 
         return True
 
@@ -498,15 +521,27 @@ class GDHService(Node):
             res_obj_status = ObjectStatus.CLOSED
         elif class_index == 10:
             # res_obj_type = ObjectType.ELEVATOR_BUTTON
-            res_obj_type = ObjectType.ALL
-        elif class_index == 11:
-            res_obj_type = ObjectType.SUBWAY_TICKET_GATE_EACH
-        elif class_index == 12:
-            # res_obj_type = ObjectType.SUBWAY_TICKET_GATE_HANDICAP
-            res_obj_type = ObjectType.SUBWAY_TICKET_GATE_EACH
-        elif class_index == 13:
-            # res_obj_type = ObjectType.SUBWAY_TICKET_GATE_ALL
-            res_obj_type = ObjectType.SUBWAY_TICKET_GATE_EACH
+            res_obj_type = ObjectType.IGNORE
+        # elif class_index == 11:
+        #     res_obj_type = ObjectType.SUBWAY_TICKET_GATE_EACH
+        # elif class_index == 12:
+        #     # res_obj_type = ObjectType.SUBWAY_TICKET_GATE_HANDICAP
+        #     res_obj_type = ObjectType.SUBWAY_TICKET_GATE_EACH
+        # elif class_index == 13:
+        #     # res_obj_type = ObjectType.SUBWAY_TICKET_GATE_ALL
+        #     res_obj_type = ObjectType.SUBWAY_TICKET_GATE_EACH
+        elif class_index in [11, 12, 13]:
+            res_obj_type = ObjectType.IGNORE
+
+            if class_index == 11 and self.pub_msg_subway_gate_each:
+                res_obj_type = ObjectType.SUBWAY_TICKET_GATE_EACH
+            if class_index == 12 and self.pub_msg_subway_gate_handicap:
+                # res_obj_type = ObjectType.SUBWAY_TICKET_GATE_HANDICAP
+                res_obj_type = ObjectType.SUBWAY_TICKET_GATE_EACH
+            if class_index == 13 and self.pub_msg_subway_gate_all:
+                # res_obj_type = ObjectType.SUBWAY_TICKET_GATE_ALL
+                res_obj_type = ObjectType.SUBWAY_TICKET_GATE_EACH
+                
         elif class_index == 14:
             res_obj_type = ObjectType.SUBWAY_SCREEN_DOOR
 
@@ -571,6 +606,10 @@ class GDHService(Node):
         # run yolo
         results = self.yolo_model.predict(source=list_imgs,
                                           imgsz=self.resize_long_px)
+        
+        if self.yoloworld_model is not None:
+            results_yoloworld = self.yoloworld_model.predict(source=list_imgs,
+                                                             imgsz=self.resize_long_px)
 
         list_np_depth_imgs = []
         if self.check_door_status:
@@ -610,7 +649,7 @@ class GDHService(Node):
 
                 obj_type, obj_status = self.det_result_to_gdi_code(cls)
 
-                if obj_type != ObjectType.ALL:
+                if obj_type != ObjectType.IGNORE:
                     if self.check_door_status and obj_type == ObjectType.ELEVATOR_DOOR:
                         matched_elevator_id = self.match_existing_elevator(idx, box_xywh)
                         if matched_elevator_id:

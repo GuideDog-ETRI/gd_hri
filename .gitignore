@@ -48,3 +48,9 @@ src/gdh_speech_audio/gdh_speech_audio/__pycache__/vito_stt_client_pb2.cpython-31
 src/gdh_package/gdh_package/__pycache__/__init__.cpython-310.pyc
 src/gdh_package/gdh_package/__pycache__/service_member_function.cpython-310.pyc
 src/gdh_speech_audio/gdh_speech_audio/__pycache__/gdh_node_monitor.cpython-310.pyc
+models/gddemo_v2/
+models/gddemo_v2.1/
+models/yolov8x-world.pt
+models/yolov8x-worldv2.pt
+rosbag/241125_1dong_democourse/
+rosbag_video_udeg0_2024_12_09-16_33_40.mp4

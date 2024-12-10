@@ -73,7 +73,7 @@ class BagVideoConverter(Node):
     def process_image(self, np_image):
         if np_image is not None:
             # ERP 이미지 펼치기
-            u_deg=-90
+            u_deg=0
             planarImg = py360convert.e2p(np_image, 
                                         fov_deg=(90, 70), 
                                         u_deg=u_deg, 
@@ -97,9 +97,10 @@ def main():
     # output_video = "rosbag_video.mp4"  # 저장할 비디오 파일 이름
 
     # bag_file = "rosbag/241125_1dong_democourse/rosbag2_2024_11_25-16_31_08"  # ROS2 bag 파일 경로
-    bag_file = "rosbag/241125_1dong_democourse/rosbag2_2024_11_25-16_16_32"
+    # bag_file = "rosbag/241125_1dong_democourse/rosbag2_2024_11_25-16_16_32"
+    bag_file = "rosbag/rosbag2_2024_12_09-16_33_40"
     topic_name = "/theta/image_raw/compressed"     # 이미지 토픽 이름
-    output_video = "rosbag_video_udeg-90_2024_11_25-16_16_32.mp4"  # 저장할 비디오 파일 이름
+    output_video = "rosbag_video_udeg0_2024_12_09-16_33_40.mp4"  # 저장할 비디오 파일 이름
 
     converter = BagVideoConverter(bag_file, topic_name, output_video)
     converter.process_bag()
