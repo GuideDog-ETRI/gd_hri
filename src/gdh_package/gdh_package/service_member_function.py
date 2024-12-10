@@ -917,11 +917,12 @@ class GDHService(Node):
                     self.get_logger().info(f'{dets_msg}')
                     self.publisher_detect.publish(dets_msg)
                     self.publisher_detect_img.publish(dets_ros_img)
-
-                    self.get_logger().debug('Sleeping for %s seconds' % sleep_duration)
                 else:
-                    pass
+                    self.get_logger().info('Passing detect_loop')
+                    cv2.destroyAllWindows()
+
                 # 종료 이벤트 또는 슬립 지속 시간을 대기
+                self.get_logger().debug('Sleeping for %s seconds' % sleep_duration)
                 self.shutdown_event.wait(timeout=sleep_duration)
         except Exception as e:
             # 루프 내에서 발생하는 예외를 로그로 남김
@@ -934,7 +935,6 @@ class GDHService(Node):
             if self.debug_display_yolo:
                 cv2.destroyAllWindows()
             self.detecting = False
-
         
     def explain_path_to_gp(self, request, response):
         self.get_logger().info('TODO: not implemented\n')
