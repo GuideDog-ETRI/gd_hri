@@ -793,18 +793,23 @@ class GDHService(Node):
 
     def start_detect_object(self, request, response):
         if self.yolo_model is None:
-            self._init_detector()
+            self._init_detector()   # load model from pt file
+
+        if self.thread is None or not self.thread.is_alive():  # 스레드가 없거나 종료된 상태인지 확인
+            self.detect_object_types = request.object_types
+            self.detecting = True
+            self.shutdown_event.clear()  # Clear shutdown event before starting
+            self.thread = threading.Thread(target=self.detect_loop)
+            self.thread.start()
         
         if self.yolo_model is None:
             response.success = False
             response.message = 'Cannot initialize detector.'
+        elif self.thread is None or not self.thread.is_alive():  # 스레드가 없거나 종료된 상태인지 확인
+            response.success = False
+            response.message = 'Cannot start detecting thread.'
         else:
             if not self.detecting:
-                self.detect_object_types = request.object_types
-                self.detecting = True
-                self.shutdown_event.clear()  # Clear shutdown event before starting
-                self.thread = threading.Thread(target=self.detect_loop)
-                self.thread.start()
                 response.success = True
                 response.message = 'Detection started.'
             else:
@@ -816,11 +821,6 @@ class GDHService(Node):
     def stop_detect_object(self, request, response):
         if self.detecting:
             self.detecting = False
-            self.shutdown_event.set()  # Signal the thread to exit
-            if self.thread is not None:
-                self.thread.join(timeout=5)  # Wait for the thread to finish
-                if self.thread.is_alive():
-                    self.get_logger().warn('Detection thread did not exit in time.')
             response.success = True
             response.message = 'Detection stopped.'
         else:
