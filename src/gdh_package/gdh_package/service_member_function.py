@@ -168,6 +168,16 @@ class GDHService(Node):
         self.elevator_bboxes_info = {}
         self.elevator_last_seen = {}
 
+        # Start detection loop
+        if self.yolo_model is None:
+            self._init_detector()   # load model from pt file
+
+        if self.thread is None or not self.thread.is_alive():  # 스레드가 없거나 종료된 상태인지 확인
+            self.detecting = False
+            self.shutdown_event.clear()  # Clear shutdown event before starting
+            self.thread = threading.Thread(target=self.detect_loop)
+            self.thread.start()
+
         self.get_logger().info(f"End of the GDH.__init__")
 
     def destroy_node(self):
