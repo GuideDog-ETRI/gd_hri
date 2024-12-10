@@ -813,7 +813,7 @@ class GDHService(Node):
                 self.detecting = True
 
                 response.success = True
-                response.message = 'Detection started.'
+                response.message = f'Detection started with {self.detect_object_types}.'
             else:
                 response.success = False
                 response.message = 'Detection is already running.'
