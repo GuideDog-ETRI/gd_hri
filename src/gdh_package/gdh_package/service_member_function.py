@@ -796,8 +796,7 @@ class GDHService(Node):
             self._init_detector()   # load model from pt file
 
         if self.thread is None or not self.thread.is_alive():  # 스레드가 없거나 종료된 상태인지 확인
-            self.detect_object_types = request.object_types
-            self.detecting = True
+            self.detecting = False
             self.shutdown_event.clear()  # Clear shutdown event before starting
             self.thread = threading.Thread(target=self.detect_loop)
             self.thread.start()
@@ -810,6 +809,9 @@ class GDHService(Node):
             response.message = 'Cannot start detecting thread.'
         else:
             if not self.detecting:
+                self.detect_object_types = request.object_types
+                self.detecting = True
+                
                 response.success = True
                 response.message = 'Detection started.'
             else:
