@@ -6,9 +6,7 @@ GDH (GuideDog HRI) module packages
 
 # 2. 설치
 ## 2.1. 리코세타(ricoh thetaz1)
-
-- 리코세타가 설치되었으면 skip가능
-- 리코세타 설치없이 녹화된 영상을 사용하겠다면 역시 skip가능
+- 리코세타 설치없이 rosbag 영상을 사용하겠다면 2.1은 skip가능
 
 2.1.1. 리코세타 연결
 - 리코세타 카메라를 USB에 연결하고(초록불 충전중), 전원 스위치를 켠다(파란불). 창에 그림이 나오면, 모드 버튼을 눌러서 모드를 '캠코더+LIVE'로 바꾼다.
@@ -129,11 +127,23 @@ GDH (GuideDog HRI) module packages
     pip install transformers
     ```
 
-- Download Yolo models from [Google drive](https://drive.google.com/drive/folders/1DFF6rFE7NYYMgBKvXmN59T1wD3KD05Tb?usp=sharing) or [GD Server](\\129.254.81.123\GuideDog_NAS\50_DB\gdh_src\models) and place in the folder /models.
+- Download Yolo models (gddemo_v2.1 version) from [Google drive](https://drive.google.com/drive/folders/1DFF6rFE7NYYMgBKvXmN59T1wD3KD05Tb?usp=sharing) or [GD Server](\\129.254.81.123\GuideDog_NAS\50_DB\gdh_src\models) and place in the folder /models.
 
 - Create /src/gdh_speech_audio/gdh_speech_audio/key_wallet.py file.
 
-- Open new terminal and build
+- Orin에 설치할 경우, 다음 사항들을 추가해야 함
+    - Orin에서 동작하는 버전의 라이브러리로 재설치
+        ```bash
+        pip uninstall tensorflow
+        pip install protobuf==5.28.1 transformers==4.46.0    
+        ```
+    - protobuf의 msg를 못읽는다는 에러를 방지하기 위해서, src/gdh_speech_audio/gdh_speech_audio/__init__.py의 첫줄에 다음 삽입
+        ```
+        import os
+        os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
+        ```
+
+- Build
     ```bash
     ./0build.sh
     ```
@@ -271,18 +281,6 @@ GDH (GuideDog HRI) module packages
 - 마이크 볼륨 컨트롤러가 안보이면,
     ```
     sudo apt install pavucontrol
-    ```
-
-- 현재 orin에서 동작하는 버전
-    protobuf==5.28.1
-    transformers=4.46.0
-    tensorflow 미설치
-
-- protobuf의 msg를 못읽는다는 에러라면,
-    gdh_speech_audio/__init__.py의 1~2줄에 다음 삽입
-    ```
-    import os
-    os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
     ```
 
 - NVIDIA Orin에서 설치시에 블루투스 동작에서 문제가 발생하는데 이와 관련된 해결책은 아래와 같음
