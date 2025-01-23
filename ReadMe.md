@@ -14,7 +14,7 @@ GDH (GuideDog HRI) module packages
 2.1.2. Install driver with docker
 - To share topics between hostpc and docker container, add below code in ~/.bashrc in hostpc
     ```bash
-    export ROS_DOMAIN_ID=7  # max 232, 번호는 자유롭게 설정. 통신하려는 장치끼리 같은 번호 써야 함.
+    export ROS_DOMAIN_ID=42  # max 232, 번호는 자유롭게 설정. 통신하려는 장치끼리 같은 번호 써야 함.
     export ROS_LOCALHOST_ONLY=1 # Topic will not go out of the PC. (It's ok between docker containers)
     ```
 
