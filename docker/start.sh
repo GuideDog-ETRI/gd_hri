@@ -12,7 +12,7 @@ echo
 # Variables
 ########################################################################################################################
 
-    USER_NAME="gdr"
+    USER_NAME="gdh"
     IMAGE_NAME="gdh"
 
     HOST_XAUTH_DIR=/home/"$USER"/.xauth_dir
