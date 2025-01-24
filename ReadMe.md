@@ -94,6 +94,7 @@ GDH (GuideDog HRI) module packages
 
 - pyaudio 설치
     ```
+    sudo apt update
     sudo apt install portaudio19-dev
     pip3 install pyaudio
     ```
