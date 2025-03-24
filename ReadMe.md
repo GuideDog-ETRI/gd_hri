@@ -299,3 +299,17 @@ GDH (GuideDog HRI) module packages
     ```
     aplay -l
     ``` -->
+
+# 5. SA-VLM on Orin 설치
+    ```bash
+    pip install vllm==0.7.4+cu126
+    
+    sudo apt update
+    sudo apt install ffmpeg
+    
+    #apt install libavformat58 --reinstall
+    #apt install libavcodec58 --reinstall
+    #apt install libavresample4 --reinstall
+    #apt install libavutil56 --reinstall
+    ```
+
