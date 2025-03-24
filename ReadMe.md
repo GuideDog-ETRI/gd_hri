@@ -302,9 +302,11 @@ GDH (GuideDog HRI) module packages
 
 # 5. SA-VLM on Orin 설치
     ```bash
-    pip install qwen-vl-utils[decord]
     pip install pygame
     pip install openai
+    
+    pip uninstall qwen-vl-utils
+    pip install qwen-vl-utils[decord]
     
     pip install vllm==0.7.4+cu126
     
