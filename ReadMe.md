@@ -320,6 +320,16 @@ GDH (GuideDog HRI) module packages
 
     pip uninstall vllm
     pip install vllm==0.7.4
+    ```
+    import vllm._C  # noqa
+    ImportError: /usr/local/lib/python3.10/dist-packages/vllm/_C.abi3.so: undefined symbol: _ZNK3c1011StorageImpl27throw_data_ptr_access_errorEv
+    에러가 나옵니다. vllm 동작시 필요한 library가 없어서 발생하는 에러.     
+    ```
+    git clone https://github.com/vllm-project/vllm.git
+    cd vllm
+    VLLM_USE_PRECOMPILED=1 pip install --editable .    
+    ```
+    
     
     #apt install libavformat58 --reinstall
     #apt install libavcodec58 --reinstall
