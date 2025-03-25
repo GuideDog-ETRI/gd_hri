@@ -329,7 +329,10 @@ GDH (GuideDog HRI) module packages
     cd vllm
     VLLM_USE_PRECOMPILED=1 pip install --editable .    
     ```
-    VLLM이 동작하기위한 관련 모듈이 업데이트 됨. 이후 다시 
+    VLLM이 동작하기위한 관련 모듈이 업데이트 됨. 이후 다시 설치
+    ```
+    pip install vllm==0.7.4+cu126
+    ```
     
     
     #apt install libavformat58 --reinstall
