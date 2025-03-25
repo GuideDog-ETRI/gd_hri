@@ -319,7 +319,7 @@ GDH (GuideDog HRI) module packages
     apt install ffmpeg
 
     pip uninstall vllm
-    pip install vllm==0.7.4
+    pip install vllm==0.7.4+cu126
     ```
     import vllm._C  # noqa
     ImportError: /usr/local/lib/python3.10/dist-packages/vllm/_C.abi3.so: undefined symbol: _ZNK3c1011StorageImpl27throw_data_ptr_access_errorEv
@@ -329,6 +329,7 @@ GDH (GuideDog HRI) module packages
     cd vllm
     VLLM_USE_PRECOMPILED=1 pip install --editable .    
     ```
+    VLLM이 동작하기위한 관련 모듈이 업데이트 됨. 이후 다시 
     
     
     #apt install libavformat58 --reinstall
