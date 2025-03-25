@@ -302,16 +302,24 @@ GDH (GuideDog HRI) module packages
 
 # 5. SA-VLM on Orin 설치
     ```bash
+    cd gdh_savlm/docker
+    # sudo docker container ls -a
+    ./start.sh
+    ```
+
+    docker 안에서,
+    ```bash
     pip install pygame
     pip install openai
     
     pip uninstall qwen-vl-utils
     pip install qwen-vl-utils[decord]
     
-    pip install vllm==0.7.4+cu126
-    
-    sudo apt update
-    sudo apt install ffmpeg
+    apt update
+    apt install ffmpeg
+
+    pip uninstall vllm
+    pip install vllm==0.7.4
     
     #apt install libavformat58 --reinstall
     #apt install libavcodec58 --reinstall
