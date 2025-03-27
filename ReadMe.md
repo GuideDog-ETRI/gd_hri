@@ -345,5 +345,4 @@ GDH (GuideDog HRI) module packages
     ros2 run flag_publisher toggle_flag_node       # 엔터를 누르면 flag on 시키고 True를 publish 노드. 아니면 False를 publish
     ros2 run qwen_text_viewer qwen_console_node    # VLM결과 받는 노드
     ros2 run ai_image_subscriber image_ai_node     # VLM client 실행하는 노드
-    
-    
+    rqt_graph    # 노드간 연결 그래프와 topic을 display
