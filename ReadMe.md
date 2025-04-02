@@ -299,3 +299,51 @@ GDH (GuideDog HRI) module packages
     ```
     aplay -l
     ``` -->
+
+# 5. SA-VLM on Orin 설치
+    ```bash
+    cd gdh_savlm/docker
+    # sudo docker container ls -a
+    ./start.sh
+    ```
+
+    docker 안에서,
+    ```bash
+    pip install pygame
+    pip install openai
+    
+    pip uninstall qwen-vl-utils
+    pip install qwen-vl-utils[decord]
+    
+    apt update
+    apt install ffmpeg
+
+    pip uninstall vllm
+    pip install vllm==0.7.4+cu126
+    ```
+    
+    import vllm._C  # noqa
+    ImportError: /usr/local/lib/python3.10/dist-packages/vllm/_C.abi3.so: undefined symbol: _ZNK3c1011StorageImpl27throw_data_ptr_access_errorEv
+    에러가 나옵니다. vllm 동작시 필요한 library가 없어서 발생하는 에러.     
+    ```
+    git clone https://github.com/vllm-project/vllm.git
+    cd vllm
+    VLLM_USE_PRECOMPILED=1 pip install --editable .    
+    ```
+    
+    VLLM이 동작하기위한 관련 모듈이 업데이트 됨. 이후 다시 설치
+    ```
+    pip install vllm==0.7.4+cu126
+    ```
+
+# 6. SA-VLM 실행
+    # colcon build --packages-select convert_image
+    . install/setup.bash
+    ros2 run convert_image image_publisher_node    # 폴더에서 이미지를 주기적으로 publish. 화살표로 이미지 전환
+    ros2 run convert_image image_viewer_node       # 이미지 확인
+    ros2 run convert_image convert_image_node      # 현재 이미지 확인.단, flag on 인경우,  Image -> Base64로 변환 후 publish
+    ros2 run flag_publisher toggle_flag_node       # 엔터를 누르면 flag on 시키고 True를 publish 노드. 아니면 False를 publish
+    ros2 run qwen_text_viewer qwen_console_node    # VLM결과 받는 노드
+    ros2 run ai_image_subscriber image_ai_node     # VLM client 실행하는 노드
+    rqt_graph    # 노드간 연결 그래프와 topic을 display
+
