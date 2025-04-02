@@ -7,6 +7,7 @@ import hashlib
 
 # GDH Interface
 from gd_ifc_pkg.srv import GDHSpeakCodeID
+from gd_ifc_pkg.srv import GDHSpeakText
 
 # TTS
 from openai import OpenAI
@@ -25,6 +26,7 @@ class MsgToAudio(Node):
 
         # service type(in/out params), name, callback func.
         self.srv_speak_codeid = self.create_service(GDHSpeakCodeID, '/GDH_speak_codeid', self.speak_codeid)
+        self.srv_speak_text = self.create_service(GDHSpeakText, '/GDH_speak_text', self.speak_text)
         
         # speak code id and TTS
         self.mp3_output_folder = 'models/temp'
@@ -58,7 +60,7 @@ class MsgToAudio(Node):
         self.play_audio(filepath)
 
     def speak_codeid(self, request, response):
-        self.get_logger().info('Generating speech...')
+        self.get_logger().info('Generating speech from codeID ...')
         
         code = request.code_id
         input_msg = self.code_sentence_map.get(code, None)
@@ -82,6 +84,33 @@ class MsgToAudio(Node):
             
         self.get_logger().info('Incoming request @ speak_codeid\n\tresponse: %d' % (response.errcode))
         self.get_logger().info(f'\tcode_id: {code}, input_msg: {input_msg}')
+        
+        return response
+        
+    def speak_text(self, request, response):
+        self.get_logger().info('Generating speech from text ...')
+        
+        input_msg = request.text
+
+        if input_msg is None:
+            response.errcode = response.ERR_UNKNOWN
+        else:
+            # Generate a hash for the input message to use as the filename
+            hash_object = hashlib.md5(input_msg.encode())
+            audio_filename = f"{hash_object.hexdigest()}.mp3"
+            audio_filepath = Path(self.mp3_output_folder) / audio_filename
+
+            if audio_filepath.exists():
+                self.get_logger().info(f"Loading existing audio file for input_msg: {input_msg}")
+                self.play_audio(audio_filepath)
+            else:
+                self.get_logger().info(f"Generating new audio file for input_msg: {input_msg}")
+                self.generate_speech(input_msg, str(audio_filepath))
+            
+            response.errcode = response.ERR_NONE
+            
+        self.get_logger().info('Incoming request @ speak_text\n\tresponse: %d' % (response.errcode))
+        self.get_logger().info(f'\tinput_msg: {input_msg}')
         
         return response
 

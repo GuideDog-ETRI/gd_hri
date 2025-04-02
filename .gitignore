@@ -54,3 +54,8 @@ models/yolov8x-world.pt
 models/yolov8x-worldv2.pt
 rosbag/241125_1dong_democourse/
 rosbag_video_udeg0_2024_12_09-16_33_40.mp4
+**/__pycache__/
+rosbag/
+models/temp/
+outputs/
+dataset/

@@ -11,10 +11,12 @@ camera:
 
 yolo_model:
   conf_threshold: 0.5
-  repo: "models/gd_demo/train958/weights/best.pt"
-  resize_long_px: 1000
+  # repo: "models/gd_demo/train958/weights/best.pt"
+  # resize_long_px: 1000
+  resize_long_px: 640
   # repo: "models/gd_demo/train972_yolov8x/weights/best.pt"
   # repo: "models/gddemo_v2/train967_yolov8m/weights/best.pt"
+  repo: "models/gddemo_v2/train972_yolov8x/weights/best.pt"
   # repo: "models/gddemo_v2.1/yolov8x_976_gddemo_v2.1_etri/weights/best.pt"  
   use_yoloworld: False
   world_repo: "models/yolov8x-world.pt"
@@ -38,3 +40,16 @@ debug:
 node_monitor:
   freq_sec: 5.0
   node_wait_sec: 10.0
+  
+image_publisher:
+  image_folder: "dataset/SA-Bench_v1_sampled/images"
+  publish_rate: 1.0
+  
+vlm:
+  server_ip_addr: "http://localhost:8000/v1"
+  # server_ip_addr: "http://129.254.87.76:8000/v1"
+  model_path: "/workspace/Qwen2.5-VL/sa-vlm/checkpoint-6430_qwen2.5vl-3b_mSAIT_kr"  
+  # model_path: "Qwen/Qwen2.5-VL-7B-Instruct"
+  # model_path: "Qwen/Qwen2.5-VL-3B-Instruct"
+  system_content: "You are a guide dog that delivers information about the surrounding environment to the blind."
+  user_content: "Please answer what you see on the floor and translate the whole answer into Korean."
