@@ -215,7 +215,7 @@ GDH (GuideDog HRI) module packages
     rqt_graph    # 노드간 연결 그래프와 topic을 display
     ```
 
-위 명령어들은 아래 명령어들을 적절히 분배해서 실행함
+- 위 명령어들은 아래 명령어들을 적절히 분배해서 실행함
 
     ```
     . install/setup.bash
