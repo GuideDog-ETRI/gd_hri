@@ -2,10 +2,10 @@ GDH (GuideDog HRI) module packages
 ==================================
 
 # 1. 소개
-[GuideDog](https://github.com/GuideDog-ETRI) 과제의 HRI파트 설치 문서이다. GDH package 설치로 나누어져 있다.
+[GuideDog](https://github.com/GuideDog-ETRI) 과제의 HRI파트 설치 문서이다. gdh_package (static object detection service), gdh_image (test image publisher), gdh_speech_audio (STT와 TTS), gdh_vlm_client (SA-VLM의 client 파트)로 구성되어있다.
 
 # 2. 설치
-## 2.1. GDH packages
+## 2.1. gdh_packages, gdh_speech_audio
 - Move to the workspace folder (assume its as ~/Desktop/gdh)
     ```bash
     cd ~/Desktop/gdh
@@ -116,8 +116,14 @@ GDH (GuideDog HRI) module packages
     ./0build.sh
     ```
 
+## 2.2. gdh_image, gdh_vlm_client
+- Build
+    ```bash
+    ./0build_vlm.sh
+    ```
+  
 # 3. 동작
-## 3.1. GDH 검출기 파트
+## 3.1. gdh_package (정적객체검출기) 파트
 - Open three new terminals by Ctrl + Alt + T for (A) dummy photo publisher, (B) GDH node, and (C) toy test client
 
 - (A) 이미지를 publish하기위해 (A-1), (A-2) 중에 하나를 실행한다.
@@ -155,7 +161,7 @@ GDH (GuideDog HRI) module packages
     ```
     * Results are saved in the GDH folder.
 
-## 3.2. STT/TTS 파트
+## 3.2. gdh_speech_audio (STT/TTS) 파트
 - Open three new terminals for GDH node, toy client for sending speech codes, toy server for receiving command id.
 - (A) Run GDH node
     ```bash
@@ -188,7 +194,31 @@ GDH (GuideDog HRI) module packages
     ros2 topic list
     ros2 topic echo /GDH_status
     ```
- 
+
+## 3.4. gdh_vlm_client (SA-VLM) 파트
+먼저 SA-VLM on Orin을 설치하고, 별도 docker에서 실행 확인
+
+gdh_docker에서 4개의 terminal을 열고 아래 명령어를 각각 실행
+    ```
+    ./1run_vlm.sh            # 폴더에서 이미지를 주기적으로 publish하고 받고 변환하는 nodes. 화살표로 이미지 전환
+    ./1run_vlm_recv.sh       # VLM결과 받고 TTS 서비스를 호출하는 node
+    ./1run_vlm_toggle.sh     # 엔터를 누르면 flag on 시키고 True를 publish 노드. 아니면 False를 publish
+    rqt_graph    # 노드간 연결 그래프와 topic을 display
+    ```
+
+위 명령어들은 아래 명령어들을 적절히 분배해서 실행함
+
+    ```
+    . install/setup.bash
+    ros2 run convert_image image_publisher_node    # 폴더에서 이미지를 주기적으로 publish. 화살표로 이미지 전환
+    ros2 run convert_image image_viewer_node       # 이미지 확인
+    ros2 run convert_image convert_image_node      # 현재 이미지 확인.단, flag on 인경우,  Image -> Base64로 변환 후 publish
+    ros2 run flag_publisher toggle_flag_node       # 엔터를 누르면 flag on 시키고 True를 publish 노드. 아니면 False를 publish
+    ros2 run qwen_text_viewer qwen_console_node    # VLM결과 받는 노드
+    ros2 run ai_image_subscriber image_ai_node     # VLM client 실행하는 노드
+    ```
+    
+
 # 4. 오류 처리
 - 만약 no module py360convert가 나온다면,
     아래 명령어로 현재 수행하는 python path를 확인
@@ -298,14 +328,4 @@ GDH (GuideDog HRI) module packages
     pip install vllm==0.7.4+cu126
     ```
 
-# 6. SA-VLM 실행
-    # colcon build --packages-select convert_image
-    . install/setup.bash
-    ros2 run convert_image image_publisher_node    # 폴더에서 이미지를 주기적으로 publish. 화살표로 이미지 전환
-    ros2 run convert_image image_viewer_node       # 이미지 확인
-    ros2 run convert_image convert_image_node      # 현재 이미지 확인.단, flag on 인경우,  Image -> Base64로 변환 후 publish
-    ros2 run flag_publisher toggle_flag_node       # 엔터를 누르면 flag on 시키고 True를 publish 노드. 아니면 False를 publish
-    ros2 run qwen_text_viewer qwen_console_node    # VLM결과 받는 노드
-    ros2 run ai_image_subscriber image_ai_node     # VLM client 실행하는 노드
-    rqt_graph    # 노드간 연결 그래프와 topic을 display
 
