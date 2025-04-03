@@ -337,4 +337,11 @@ GDH (GuideDog HRI) module packages
     pip install vllm==0.7.4+cu126
     ```
 
+    orin h/w 사용량 체크
+    ```
+    jtop
+    ```
+
+
+
 
