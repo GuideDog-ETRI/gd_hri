@@ -199,10 +199,19 @@ GDH (GuideDog HRI) module packages
 먼저 SA-VLM on Orin을 설치하고, 별도 docker에서 실행 확인
 
 gdh_docker에서 4개의 terminal을 열고 아래 명령어를 각각 실행
-    ```
+    ```bash
     ./1run_vlm.sh            # 폴더에서 이미지를 주기적으로 publish하고 받고 변환하는 nodes. 화살표로 이미지 전환
+    ```
+
+    ```bash
     ./1run_vlm_recv.sh       # VLM결과 받고 TTS 서비스를 호출하는 node
+    ```
+
+    ```bash
     ./1run_vlm_toggle.sh     # 엔터를 누르면 flag on 시키고 True를 publish 노드. 아니면 False를 publish
+    ```
+
+    ```bash
     rqt_graph    # 노드간 연결 그래프와 topic을 display
     ```
 
