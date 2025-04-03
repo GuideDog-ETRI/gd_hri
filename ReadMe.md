@@ -196,9 +196,9 @@ GDH (GuideDog HRI) module packages
     ```
 
 ## 3.4. gdh_vlm_client (SA-VLM) 파트
-먼저 SA-VLM on Orin을 설치하고, 별도 docker에서 실행 확인
+- 먼저 SA-VLM on Orin을 설치하고, 별도 docker에서 실행 확인
+- gdh_docker에서 4개의 terminal을 열고 아래 명령어를 각각 실행
 
-gdh_docker에서 4개의 terminal을 열고 아래 명령어를 각각 실행
     ```bash
     ./1run_vlm.sh            # 폴더에서 이미지를 주기적으로 publish하고 받고 변환하는 nodes. 화살표로 이미지 전환
     ```
