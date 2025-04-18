@@ -83,9 +83,9 @@ GDH (GuideDog HRI) module packages
     cd ..
     ```
 
-- To use yolo-v8 and rectify erp images
+- To use yolo-v8 and rectify erp images (1.0.1 버전은 출력이미지를 정사각형으로 만드는 버그 있음. must use py360convert>=1.0.2)
     ```bash
-    pip install py360convert
+    pip install py360convert>=1.0.2
     pip install ultralytics
     pip install numpy==1.25.0
     ```

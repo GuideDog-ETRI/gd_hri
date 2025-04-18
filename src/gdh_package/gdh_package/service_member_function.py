@@ -138,6 +138,8 @@ class GDHService(Node):
         self.yolo_conf_threshold = conf['yolo_model']['conf_threshold']
         self.yolo_repo = conf['yolo_model']['repo']
         self.resize_long_px = conf['yolo_model']['resize_long_px']
+        self.convert_to_planar_out_h = conf['yolo_model']['convert_to_planar']['out_h']
+        self.convert_to_planar_out_w = conf['yolo_model']['convert_to_planar']['out_w']
         self.use_yoloworld = conf['yolo_model']['use_yoloworld']
         self.yoloworld_repo = conf['yolo_model']['world_repo']
 
@@ -285,7 +287,7 @@ class GDHService(Node):
                     htheta_for_converter += 360
 
                 planar_image = self.convert_to_planar(ricohz_erp_image, fov_deg=(hfov, vfov), 
-                                                      u_deg=htheta_for_converter, v_deg=vtheta)
+                                                      u_deg=htheta_for_converter, v_deg=vtheta, out_hw=(self.convert_to_planar_out_h, self.convert_to_planar_out_w))
                 res_imgs.append(planar_image)
                 self.get_logger().info(f'get_rectified_ricoh_images: rectified erp image size {planar_image.shape}')
 
@@ -347,7 +349,7 @@ class GDHService(Node):
     
     def convert_to_planar(self, np_image, fov_deg=(90, 70), u_deg=0, v_deg=0, out_hw=(480, 640),  mode="bilinear"):
         '''
-        fov_deg=(90, 70)
+        fov_deg=(90, 70)	# (w, h)
         u_deg=0  # hori axis
         v_deg=0  # vert axis
         out_hw=(480,640)
@@ -357,12 +359,14 @@ class GDHService(Node):
         in_h, in_w, _ = np_image.shape
         (out_h, out_w) = out_hw
 
-        # rescaling
-        ratio_h = 640. / 90.
-        new_w = int(ratio_h * fov_deg[0])
-        out_hw = (out_hw[0], new_w)
+        # # rescaling
+        # ratio_h = 640. / 90.
+        # new_w = int(ratio_h * fov_deg[0])
+        # out_hw = (out_hw[0], new_w)
 
+        self.get_logger().info(f'py360convert args: np_image: {np_image.shape}, fov_deg: {fov_deg}, out_hw: {out_hw}')
         planarImg = py360convert.e2p(np_image, fov_deg=fov_deg, u_deg=u_deg, v_deg=v_deg, out_hw=out_hw, mode=mode)
+        self.get_logger().info(f'py360convert outs: planarImg: {planarImg.shape}')
         
         return planarImg
     
@@ -846,6 +850,12 @@ class GDHService(Node):
 
         try:
             while not self.shutdown_event.is_set():
+                res, list_imgs = self.get_images(
+                    htheta_list=self.htheta_list, 
+                    vtheta_list=self.vtheta_list,
+                    hfov=self.hfov, 
+                    vfov=self.vfov
+                )
                 if self.detecting:
                     self.get_logger().debug('Detecting loop start')
                     # dets_msg
@@ -856,12 +866,6 @@ class GDHService(Node):
                     dets_msg.header = header
                     dets_msg.detections = []
                     
-                    res, list_imgs = self.get_images(
-                        htheta_list=self.htheta_list, 
-                        vtheta_list=self.vtheta_list,
-                        hfov=self.hfov, 
-                        vfov=self.vfov
-                    )
                     if res:
                         list_img_infos = []
                         for idx, img in enumerate(list_imgs):
@@ -931,8 +935,14 @@ class GDHService(Node):
                 else:
                     # self.get_logger().info('Passing detect_loop')
                     if self.debug_display_yolo:
-                        # cv2.destroyAllWindows()
-                        black_np_img = np.zeros((480, 640, 3), dtype=np.uint8)
+                        if res:
+                            black_np_img = self.combine_numpy_images(list_imgs)
+                        else:
+                            # cv2.destroyAllWindows()
+                            black_np_img = np.zeros((480, 640, 3), dtype=np.uint8)
+                            
+                        self.get_logger().info(f'Passing detect_loop, black_np_img: {black_np_img.shape}')
+                        self.get_logger().info(f'=======================================================')
                         cv2.imshow('Detection Result', black_np_img)
                         cv2.waitKey(1)
 
