@@ -288,6 +288,12 @@ GDH (GuideDog HRI) module packages
 - NVIDIA Orin에서 설치시에 블루투스 동작에서 문제가 발생하는데 이와 관련된 해결책은 아래와 같음
     * [명령어 업데이트 방식](https://forums.developer.nvidia.com/t/nvidia-jetson-xavier-nx-bluetooth-connection-issue/156351/31) -> 시도했지만 해결 안됨
     * [Jetpack update 방식](https://forums.developer.nvidia.com/t/bluetooth-connectivity-issues-with-jetson-orin-nano/290484)
+    
+- py360convert.ep()함수로 rectified 된 이미지의 크기가 정사각형이라면, py360convert의 라이브러리 업데이트가 필요 (>= 1.0.2)
+    ```
+    pip show py360convert
+    pip install --upgrade py360convert
+    ```
  
 
 <!-- - 사운드 카드 미인식 혹은 설정 오류
