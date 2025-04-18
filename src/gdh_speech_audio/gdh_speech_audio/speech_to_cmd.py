@@ -46,6 +46,11 @@ class SpeechToTextClient(Node):
         self._token = None
         self.stream = None
 
+        # PyAudio 초기화 및 스트림 열기
+        self.audio = pyaudio.PyAudio()
+        self.stream = None
+        self.open_stream()
+
     @property
     def token(self):
         if self._token is None or self._token["expire_at"] < time.time():
@@ -57,14 +62,23 @@ class SpeechToTextClient(Node):
             self._token = resp.json()
         return self._token["access_token"]
 
+    def open_stream(self):
+        """스트림이 없을 때만 새로 엽니다."""
+        if self.stream is None:
+            self.stream = self.audio.open(
+                format=pyaudio.paInt16,
+                channels=1,
+                rate=STT_SAMPLE_RATE,
+                input=True,
+                frames_per_buffer=DEFAULT_BUFFER_SIZE
+            )
+            self.get_logger().info("Audio stream opened.")
+
     def transcribe_streaming_grpc(self, config):        
         try:
-            audio = pyaudio.PyAudio()
-            self.stream = audio.open(format=pyaudio.paInt16,
-                                channels=1,
-                                rate=STT_SAMPLE_RATE,
-                                input=True,
-                                frames_per_buffer=DEFAULT_BUFFER_SIZE)
+            # 스트림이 닫혔으면 다시 열기
+            self.open_stream()
+
         
             with grpc.secure_channel(STT_GRPC_SERVER_URL, credentials=grpc.ssl_channel_credentials()) as channel:
                 stub = pb_grpc.OnlineDecoderStub(channel)
@@ -92,11 +106,16 @@ class SpeechToTextClient(Node):
             self.get_logger().error(f"gRPC error: {e}")
         except Exception as e:
             self.get_logger().error(f"Error in PyAudio: {e}")
-        finally:
-            if self.stream:
-                self.stream.stop_stream()
-                self.stream.close()
-            audio.terminate()
+        
+        # 실패 시 None 반환
+        return None   
+
+    def __del__(self):
+        # 노드 종료 시 한 번만 스트림과 PyAudio 정리
+        if self.stream is not None:
+            self.stream.stop_stream()
+            self.stream.close()
+        self.audio.terminate()     
 
 
 class SpeechToCmd(Node):
