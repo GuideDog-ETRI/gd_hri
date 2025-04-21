@@ -8,6 +8,8 @@ from std_msgs.msg import String
 
 from gd_ifc_pkg.srv import GDHSpeakText
 
+import datetime
+
 class QwenConsoleNode(Node):
     def __init__(self):
         super().__init__('qwen_console_node')
@@ -30,6 +32,11 @@ class QwenConsoleNode(Node):
         # 문장 종결부호(. ! ?)를 포함하는 문장을 추출하는 정규식 패턴
         self.sentence_pattern = re.compile(r'^(.*?[.!?])\s*(.*)$')
 
+    def log_info(self, msg: str):
+        # 현재 시간을 사람이 읽기 좋은 형식으로 변환
+        current_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        # 커스텀 로그 메시지 구성 및 출력
+        self.get_logger().info(f'[{current_time}] {msg}')
 
     def callback_qwen_result(self, msg: String):
         # 새로 들어온 token들을 버퍼에 누적
@@ -48,8 +55,9 @@ class QwenConsoleNode(Node):
             sentence = match.group(1).strip()
             # 남은 미완성 텍스트
             remainder = match.group(2)
-            
-            print(f"[QWEN] {sentence}\n")
+
+            self.log_info(f"[QWEN] {sentence}\n")
+           
             self.call_speak_service(sentence)
             
             # 남은 부분을 대상으로 다시 검사

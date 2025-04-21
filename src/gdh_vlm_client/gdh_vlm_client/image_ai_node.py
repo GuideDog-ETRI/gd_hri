@@ -11,6 +11,7 @@ from openai import OpenAI
 # yaml
 import os
 import yaml
+import datetime
 
 class QwenImageSubscriberNode(Node):
     def __init__(self):
@@ -53,6 +54,12 @@ class QwenImageSubscriberNode(Node):
             10
         )
 
+    def log_info(self, msg: str):
+        # 현재 시간을 사람이 읽기 좋은 형식으로 변환
+        current_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        # 커스텀 로그 메시지 구성 및 출력
+        self.get_logger().info(f'[{current_time}] {msg}')
+        
     def image_callback_whole_return(self, msg: String):
         """
         수신된 base64 이미지를 Qwen 모델에 전달하고,
@@ -93,7 +100,8 @@ class QwenImageSubscriberNode(Node):
             out_msg.data = response_content
             self.result_pub.publish(out_msg)
 
-            self.get_logger().info("[Qwen content] published to /qwen_result")
+            # self.get_logger().info("[Qwen content] published to /qwen_result")
+            self.log_info("[Qwen content] published to /qwen_result")
 
         except Exception as e:
             self.get_logger().error(f"Error calling Qwen API: {e}")
@@ -133,7 +141,8 @@ class QwenImageSubscriberNode(Node):
                 chunk_content = chunk.choices[0].delta.content
 
                 # 2) 콘솔 출력 (선택)
-                self.get_logger().info(f"[Qwen chunk content] {chunk_content}")
+                # self.get_logger().info(f"[Qwen chunk content] {chunk_content}")
+                self.log_info(f"[Qwen chunk content] {chunk_content}")
 
                 # 3) 토픽 퍼블리시
                 out_msg = String()

@@ -22,7 +22,8 @@ class GDHNodeMonitor(Node):
         # 감시할 노드 정보: {노드 이름: 재시작 명령어}
         self.nodes_to_monitor = {
 #            '/msg_to_audio': 'ros2 run gdh_speech_audio srv_play_audio_from_msg',
-            '/speech_to_cmd': 'ros2 run gdh_speech_audio pub_command_from_speech',
+#            '/speech_to_cmd': 'ros2 run gdh_speech_audio pub_command_from_speech',
+            '/speech_to_cmd': 'ros2 run gdh_speech_audio pub_command_from_speech_by_w',
         }
 
         # 일정 주기마다 상태 확인

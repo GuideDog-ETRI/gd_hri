@@ -5,6 +5,8 @@ from rclpy.node import Node
 import os
 import hashlib
 
+import datetime
+
 # GDH Interface
 from gd_ifc_pkg.srv import GDHSpeakCodeID
 from gd_ifc_pkg.srv import GDHSpeakText
@@ -37,6 +39,12 @@ class MsgToAudio(Node):
         self.client_openai = OpenAI()
         self.code_sentence_map = self.load_code_sentence_table('models/code_sentence_table.txt') 
 
+    def log_info(self, msg: str):
+        # 현재 시간을 사람이 읽기 좋은 형식으로 변환
+        current_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        # 커스텀 로그 메시지 구성 및 출력
+        self.get_logger().info(f'[{current_time}] {msg}')
+
     # TTS
     def play_audio(self, filepath):
         try:
@@ -51,12 +59,14 @@ class MsgToAudio(Node):
             pygame.mixer.quit()  # Release device
 
     def generate_speech(self, input_msg, filepath, model="tts-1", voice="alloy"):
+        self.log_info(f'Before openai_tts: {input_msg}')
         response = self.client_openai.audio.speech.create(
             model=model,
             voice=voice,
             input=input_msg,
         )
         response.stream_to_file(filepath)
+        self.log_info(f'Before play_audio: {filepath}')
         self.play_audio(filepath)
 
     def speak_codeid(self, request, response):
