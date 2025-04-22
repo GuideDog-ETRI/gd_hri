@@ -29,11 +29,11 @@ import whisper, torch
 from queue import Queue
 from datetime import datetime, timedelta
 
-WHISPER_MODEL_NAME = "large-v3"      # 필요하면 tiny / base / … 로 교체
+WHISPER_MODEL_NAME = "large-v3-turbo"      # 필요하면 tiny / base / … 로 교체
 MIC_SAMPLE_RATE   = 16_000            # Whisper 권장 값
 ENERGY_THRESHOLD  = 1000
-RECORD_TIMEOUT    = 2.0               # 콜백 오디오 길이(초)
-PHRASE_TIMEOUT    = 3.0               # 침묵 지속(초) → 문장 경계
+RECORD_TIMEOUT    = 1.0               # 콜백 오디오 길이(초)
+PHRASE_TIMEOUT    = 1.0               # 침묵 지속(초) → 문장 경계
 
 class SpeechToTextClient(Node):
     """
@@ -75,7 +75,7 @@ class SpeechToTextClient(Node):
         self.data_queue.put(audio.get_raw_data())
 
     # ───────── 외부 API ─────────
-    def transcribe_once(self) -> str | None:
+    def transcribe_once_base(self) -> str | None:
         """완성된 문장이 생길 때까지 블록, 생기면 문자열·실패면 None."""
         while rclpy.ok():
             if not self.data_queue.empty():
@@ -110,7 +110,45 @@ class SpeechToTextClient(Node):
                 rclpy.spin_once(self, timeout_sec=0.1)
 
         return None  # 노드가 종료될 때
-
+    
+    def transcribe_once(self) -> str | None:
+        """
+        완성된 문장이 끝났을 때만 Whisper STT 호출.
+        - 3초 이상 침묵 지속되면 문장 경계로 간주
+        - 이후 큐가 비었을 때만 Whisper 호출
+        """
+        while rclpy.ok():
+            if not self.data_queue.empty():
+                now = datetime.utcnow()
+    
+                # 침묵 지속 시간 체크
+                if self.phrase_time and (now - self.phrase_time) > timedelta(seconds=PHRASE_TIMEOUT):
+                    # 아직 큐에 오디오가 있으면 다음 루프에서 처리
+                    if not self.data_queue.empty():
+                        continue
+    
+                    # 말이 끝났고, 큐도 비어있음 → 이제 STT 시도
+                    audio_np = (np.frombuffer(self.phrase_bytes, dtype=np.int16)
+                                .astype(np.float32) / 32768.0)
+                    self.phrase_bytes = b""  # 다음 문장을 위해 초기화
+    
+                    try:
+                        result = self.model.transcribe(audio_np, fp16=torch.cuda.is_available())
+                        text = result["text"].strip()
+                        return text if text else None
+                    except Exception as e:
+                        self.get_logger().error(f"Whisper error: {e}")
+                        return None
+    
+                # 문장 이어쓰기
+                self.phrase_time = now
+                while not self.data_queue.empty():
+                    self.phrase_bytes += self.data_queue.get()
+    
+            else:
+                rclpy.spin_once(self, timeout_sec=0.1)
+    
+        return None
 # ──────────────────  명령 노드  ──────────────────
 class SpeechToCmd(Node):
     def __init__(self):
