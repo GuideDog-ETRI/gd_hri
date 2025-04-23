@@ -76,32 +76,13 @@ class GDHService(Node):
         else:
             raise AssertionError(f'No gdh_config file in {path_to_config}.')
 
-        self.input_type = 'ricoh_comp'   # ['rgb_raw' | 'ricoh_raw' | 'ricoh_comp' ]
+        self.input_type = 'ricoh_comp'   # ['rgb_raw' | 'ricoh_raw' | 'ricoh_comp' ]        
+        assert self.input_type == 'ricoh_comp'
         # 'rgb_raw': for testing GDH individual functions. Image are published from folders.
         # 'ricoh_raw': for testing ROS communications of GDH
         # 'rocoh_comp': for deployment
         
-        subs_handlers = {
-            'rgb_raw': self.handle_subs_rgb_raw,
-            'ricoh_raw': self.handle_subs_ricoh_raw,
-            'ricoh_comp': self.handle_subs_ricoh_comp
-        }
-        self.subs_handler = subs_handlers.get(self.input_type)
-        if self.subs_handler:
-            self.subscription = self.subs_handler()
-        else:
-            raise AssertionError(f'Unexpected input_type for subs_handlers: {self.input_type}')
-        
-        get_img_handlers = {
-            'rgb_raw': self.get_rgb_images,
-            'ricoh_raw': self.get_rectified_ricoh_images,
-            'ricoh_comp': self.get_rectified_ricoh_images
-        }
-        get_img_handler = get_img_handlers.get(self.input_type)
-        if get_img_handler:
-            self.get_images = get_img_handler
-        else:
-            raise AssertionError(f'Unexpected input_type for get_img_handers: {self.input_type}')
+        self.subscription = self.handle_subs_ricoh_comp()
         
         self.bridge = CvBridge()
         self.subscription  # prevent unused variable warning
@@ -206,25 +187,6 @@ class GDHService(Node):
         
         return subscription
     
-    def handle_subs_ricoh_raw(self):
-        qos_profile = QoSProfile(depth=10)
-        # Raw ERP Image
-        subscription = self.create_subscription(
-            Image, '/theta/image_raw/compressed',
-            self.listener_callback_ricoh_raw,
-            qos_profile=qos_profile)
-        
-        return subscription
-    
-    def handle_subs_rgb_raw(self):
-        qos_profile = QoSProfile(depth=10)
-        # Raw RGB Image
-        subscription = self.create_subscription(
-            Image, '/image_raw',
-            self.listener_callback_rgb_raw,
-            qos_profile=qos_profile)
-        
-        return subscription
     
     # Heartbeat
     def timer_callback(self):
@@ -242,7 +204,7 @@ class GDHService(Node):
             if self.latest_ricoh_erp_image is None and self.latest_rgb_raw_image is None:
                 status_msg.errcode = status_msg.ERR_NO_IMAGE    # No Images in all image containers
 
-                self.subscription = self.subs_handler()
+                self.subscription = self.handle_subs_ricoh_comp()
                 self.get_logger().info(f"Try to subscribing image in timer_callback!")
             else:
                 status_msg.errcode = status_msg.ERR_NONE  # 오류 없음
@@ -258,15 +220,6 @@ class GDHService(Node):
         self.latest_ricoh_erp_image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)    # nparray is returned
         # self.get_logger().info(f'listener_callback: msg latest_ricoh_erp_image size {self.latest_ricoh_erp_image.shape}')
     
-    def listener_callback_ricoh_raw(self, msg):
-    	# raw image w/o compression to numpy
-        self.latest_ricoh_erp_image = self.bridge.imgmsg_to_cv2(msg, 'bgr8')    # nparray is returned
-
-    def listener_callback_rgb_raw(self, msg):
-    	# raw image w/o compression to numpy
-        self.latest_rgb_raw_image = self.bridge.imgmsg_to_cv2(msg, 'bgr8')    # nparray is returned
-
-
 
     def get_rectified_ricoh_images(self, htheta_list, vtheta_list, hfov, vfov):        
         res_imgs = []
@@ -290,29 +243,6 @@ class GDHService(Node):
                                                       u_deg=htheta_for_converter, v_deg=vtheta, out_hw=(self.convert_to_planar_out_h, self.convert_to_planar_out_w))
                 res_imgs.append(planar_image)
                 self.get_logger().info(f'get_rectified_ricoh_images: rectified erp image size {planar_image.shape}')
-
-            res = True
-        else:
-            res = False
-
-        return res, res_imgs
-    
-    def get_rgb_images(self, htheta_list, vtheta_list, hfov, vfov):        
-        res_imgs = []
-
-        if self.latest_rgb_raw_image is not None:
-            if not isinstance(htheta_list, list):
-                htheta_list = [htheta_list]
-
-            if not isinstance(vtheta_list, list):
-                vtheta_list = [vtheta_list]
-        
-            latest_rgb_raw_image = np.copy(self.latest_rgb_raw_image)
-
-            num_imgs = len(htheta_list)
-
-            res_imgs = self.split_image(latest_rgb_raw_image, num_imgs)
-            self.get_logger().info(f'get_rgb_images: rectified erp image size {res_imgs[0].shape}')
 
             res = True
         else:
@@ -850,7 +780,7 @@ class GDHService(Node):
 
         try:
             while not self.shutdown_event.is_set():
-                res, list_imgs = self.get_images(
+                res, list_imgs = self.get_rectified_ricoh_images(
                     htheta_list=self.htheta_list, 
                     vtheta_list=self.vtheta_list,
                     hfov=self.hfov, 

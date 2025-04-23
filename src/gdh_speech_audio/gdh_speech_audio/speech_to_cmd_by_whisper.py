@@ -26,6 +26,7 @@ def play_audio(filepath: str):
 import numpy as np
 import speech_recognition as sr
 import whisper, torch
+import re
 from queue import Queue
 from datetime import datetime, timedelta
 
@@ -77,6 +78,12 @@ class SpeechToTextClient(Node):
     # ───────── 외부 API ─────────
     def transcribe_once_base(self) -> str | None:
         """완성된 문장이 생길 때까지 블록, 생기면 문자열·실패면 None."""
+        
+        # buffer initialization
+        self.phrase_bytes = b""
+        with self.data_queue.mutex:
+            self.data_queue.queue.clear()
+            
         while rclpy.ok():
             if not self.data_queue.empty():
                 now = datetime.utcnow()
@@ -94,13 +101,13 @@ class SpeechToTextClient(Node):
                 # PCM int16 → float32(-1~1)
                 audio_np = (np.frombuffer(self.phrase_bytes, dtype=np.int16)
                             .astype(np.float32) / 32768.0)
-
                 try:
                     result = self.model.transcribe(
                         audio_np,
                         fp16=torch.cuda.is_available(),
                     )
                     text = result["text"].strip()
+                    text = re.sub(r'[^가-힣]+', '', text)
                     if text:
                         return text
                 except Exception as e:
@@ -182,14 +189,14 @@ class SpeechToCmd(Node):
                 play_audio("models/temp/start_recording.ogg")
                 self.get_logger().info("Recording…")
 
-                stt_result = self.stt_client.transcribe_once()
+                stt_result = self.stt_client.transcribe_once_base()
                 if not stt_result:
                     self.get_logger().error("STT returned nothing.")
                     continue
 
                 stt_key = stt_result.replace(" ", "")
-                play_audio("models/temp/stop_recording.ogg")
                 self.get_logger().info(f"STT result: “{stt_key}”")
+                play_audio("models/temp/stop_recording.ogg")
 
                 if stt_key in self.commands:
                     play_audio("models/temp/recognized.ogg")
