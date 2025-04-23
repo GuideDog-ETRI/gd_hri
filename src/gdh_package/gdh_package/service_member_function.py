@@ -37,6 +37,8 @@ from PIL import Image as PilImage
 # yaml
 import yaml
 
+from .erp_rectify_fast_caching import erp_to_rect
+
 # Object type and status
 from enum import IntEnum
 from ctypes import c_uint8
@@ -234,15 +236,25 @@ class GDHService(Node):
             ricohz_erp_image = np.copy(self.latest_ricoh_erp_image)
 
             for htheta, vtheta in zip(htheta_list, vtheta_list):
-                htheta_for_converter = htheta - 180
+                # htheta_for_converter = htheta - 180
 
-                if htheta_for_converter < -180:
-                    htheta_for_converter += 360
+                # if htheta_for_converter < -180:
+                    # htheta_for_converter += 360
 
-                planar_image = self.convert_to_planar(ricohz_erp_image, fov_deg=(hfov, vfov), 
-                                                      u_deg=htheta_for_converter, v_deg=vtheta, out_hw=(self.convert_to_planar_out_h, self.convert_to_planar_out_w))
+                # planar_image = self.convert_to_planar(ricohz_erp_image, fov_deg=(hfov, vfov), 
+                #                                       u_deg=htheta_for_converter, v_deg=vtheta, out_hw=(self.convert_to_planar_out_h, self.convert_to_planar_out_w))
+                                                    
+                ###
+                self.get_logger().info(f'erp_to_rect args: ricohz_erp_image: {ricohz_erp_image.shape}, fov_deg_hv: ({hfov}, {vfov}), htheta: {htheta}')
+                planar_image = erp_to_rect(erp_image=ricohz_erp_image, 
+                                           theta=np.deg2rad(htheta),
+                                           hfov=np.deg2rad(hfov),
+                                           vfov=np.deg2rad(vfov)
+                                          )
+                self.get_logger().info(f'erp_to_rect outs: planar_image: {planar_image.shape}')
+                ###                                   
+                                                      
                 res_imgs.append(planar_image)
-                self.get_logger().info(f'get_rectified_ricoh_images: rectified erp image size {planar_image.shape}')
 
             res = True
         else:
@@ -548,8 +560,10 @@ class GDHService(Node):
             self.service_available = False  # 서비스 사용 가능 여부를 추적
 
         # run yolo
-        results = self.yolo_model.predict(source=list_imgs,
-                                          imgsz=self.resize_long_px)
+        if self.resize_long_px <= 0:
+            results = self.yolo_model.predict(source=list_imgs)
+        else:
+            results = self.yolo_model.predict(source=list_imgs, imgsz=self.resize_long_px)
         
         if self.yoloworld_model is not None:
             results_yoloworld = self.yoloworld_model.predict(source=list_imgs,

@@ -13,7 +13,7 @@ yolo_model:
   conf_threshold: 0.5
   # repo: "models/gd_demo/train958/weights/best.pt"
   # resize_long_px: 1000
-  resize_long_px: 1280
+  resize_long_px: 0
   convert_to_planar:
     # out_h: 480
     # out_w: 640
@@ -60,3 +60,10 @@ vlm:
   # model_path: "Qwen/Qwen2.5-VL-3B-Instruct"
   system_content: "You are a guide dog that delivers information about the surrounding environment to the blind."
   user_content: "Please answer what you see on the floor and translate the whole answer into Korean."
+  
+openai_whisper:
+  WHISPER_MODEL_NAME: "large-v3-turbo"
+  MIC_SAMPLE_RATE: 16_000
+  ENERGY_THRESHOLD: 1000
+  RECORD_TIMEOUT: 1.0
+  PHRASE_TIMEOUT: 1.0

@@ -22,6 +22,10 @@ def play_audio(filepath: str):
     finally:
         pygame.mixer.quit()
 
+
+import os
+import yaml
+
 # ──────────────────  Whisper STT  ──────────────────
 import numpy as np
 import speech_recognition as sr
@@ -29,12 +33,6 @@ import whisper, torch
 import re
 from queue import Queue
 from datetime import datetime, timedelta
-
-WHISPER_MODEL_NAME = "large-v3-turbo"      # 필요하면 tiny / base / … 로 교체
-MIC_SAMPLE_RATE   = 16_000            # Whisper 권장 값
-ENERGY_THRESHOLD  = 1000
-RECORD_TIMEOUT    = 1.0               # 콜백 오디오 길이(초)
-PHRASE_TIMEOUT    = 1.0               # 침묵 지속(초) → 문장 경계
 
 class SpeechToTextClient(Node):
     """
@@ -44,18 +42,32 @@ class SpeechToTextClient(Node):
     """
     def __init__(self):
         super().__init__("speech_to_text_client")
+        
+        # load from conf.yaml
+        path_to_config = 'models/gdh_config.yaml'
+        if os.path.exists(path_to_config):
+            with open(path_to_config) as fid:
+                conf = yaml.full_load(fid)
+        else:
+            raise AssertionError(f'No gdh_config file in {path_to_config}.')
+        
+        self.WHISPER_MODEL_NAME = conf['openai_whisper']['WHISPER_MODEL_NAME']
+        self.MIC_SAMPLE_RATE   = conf['openai_whisper']['MIC_SAMPLE_RATE']
+        self.ENERGY_THRESHOLD  = conf['openai_whisper']['ENERGY_THRESHOLD']
+        self.RECORD_TIMEOUT    = conf['openai_whisper']['RECORD_TIMEOUT']
+        self.PHRASE_TIMEOUT    = conf['openai_whisper']['PHRASE_TIMEOUT']
 
         # Whisper 모델
-        self.get_logger().info(f"Loading Whisper model “{WHISPER_MODEL_NAME}”…")
-        self.model = whisper.load_model(WHISPER_MODEL_NAME)
+        self.get_logger().info(f"Loading Whisper model “{self.WHISPER_MODEL_NAME}”…")
+        self.model = whisper.load_model(self.WHISPER_MODEL_NAME)
         self.get_logger().info("Whisper loaded.")
 
         # SpeechRecognition 설정
         self.recognizer = sr.Recognizer()
-        self.recognizer.energy_threshold = ENERGY_THRESHOLD
+        self.recognizer.energy_threshold = self.ENERGY_THRESHOLD
         self.recognizer.dynamic_energy_threshold = False
 
-        self.mic = sr.Microphone(sample_rate=MIC_SAMPLE_RATE)
+        self.mic = sr.Microphone(sample_rate=self.MIC_SAMPLE_RATE)
         with self.mic:
             self.recognizer.adjust_for_ambient_noise(self.mic, duration=0.5)
 
@@ -68,7 +80,7 @@ class SpeechToTextClient(Node):
         self.recognizer.listen_in_background(
             self.mic,
             self._record_callback,
-            phrase_time_limit=RECORD_TIMEOUT,
+            phrase_time_limit=self.RECORD_TIMEOUT,
         )
 
     # ───────── 내부 콜백 ─────────
@@ -89,7 +101,7 @@ class SpeechToTextClient(Node):
                 now = datetime.utcnow()
 
                 # 침묵이 길었다면 새 문장
-                if self.phrase_time and (now - self.phrase_time) > timedelta(seconds=PHRASE_TIMEOUT):
+                if self.phrase_time and (now - self.phrase_time) > timedelta(seconds=self.PHRASE_TIMEOUT):
                     self.phrase_bytes = b""
 
                 self.phrase_time = now
@@ -129,7 +141,7 @@ class SpeechToTextClient(Node):
                 now = datetime.utcnow()
     
                 # 침묵 지속 시간 체크
-                if self.phrase_time and (now - self.phrase_time) > timedelta(seconds=PHRASE_TIMEOUT):
+                if self.phrase_time and (now - self.phrase_time) > timedelta(seconds=self.PHRASE_TIMEOUT):
                     # 아직 큐에 오디오가 있으면 다음 루프에서 처리
                     if not self.data_queue.empty():
                         continue
