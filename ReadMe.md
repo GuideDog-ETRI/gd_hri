@@ -65,6 +65,20 @@ GDH (GuideDog HRI) module packages
     sudo apt install portaudio19-dev
     pip3 install pyaudio
     ```
+    
+- pulseaudio 설치와 데몬 실행
+    ```
+    sudo apt-get install pulseaudio
+    sudo apt-get install pulseaudio-module-bluetooth
+    sudo pulseaudio --start
+    ```
+    
+- OpenAI Whisper관련 모듈 설치
+    ```
+    pip install SpeechRecognition
+    pip install git+https://github.com/openai/whisper.git 
+    ```
+
 
 - Download gd_ifc_pkg (interfaces for all gd modules) from [github](https://github.com/GuideDog-ETRI/gd_ifc_pkg).
     ```bash
