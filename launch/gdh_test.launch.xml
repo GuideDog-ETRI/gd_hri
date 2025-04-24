@@ -1,6 +1,6 @@
 <launch>
   <node pkg="gdh_speech_audio" exec="srv_play_audio_from_msg" name="srv_play_audio_from_msg" output="screen"/>
-  <!-- <node pkg="gdh_speech_audio" exec="pub_command_from_speech_by_w" name="pub_command_from_speech_by_w" output="screen"/> -->
-  <node pkg="gdh_speech_audio" exec="gdh_node_monitor" name="gdh_node_monitor" output="screen"/>
+  <node pkg="gdh_speech_audio" exec="pub_command_from_speech_by_w" name="pub_command_from_speech_by_w" output="screen"/>
+  <!-- <node pkg="gdh_speech_audio" exec="gdh_node_monitor" name="gdh_node_monitor" output="screen"/> -->
   <node pkg="gdh_package" exec="service" name="service" output="screen"/>
 </launch>

@@ -1,12 +1,12 @@
-# camera: 'theta_cart'
+# # # camera: 'theta_cart'
 camera: 
   id: "theta_rbq3"
-  # htheta_list:
-  #   - 90
-  #   - 180
-  #   - -90
+#  htheta_list:
+#    - 90
+#    - 180
+#    - -90
   htheta_list:
-   - 180
+    - 180
   hfov: 90
 
 yolo_model:

@@ -57,6 +57,12 @@ class SpeechToTextClient(Node):
         self.RECORD_TIMEOUT    = conf['openai_whisper']['RECORD_TIMEOUT']
         self.PHRASE_TIMEOUT    = conf['openai_whisper']['PHRASE_TIMEOUT']
 
+        self.get_logger().info(f"WHISPER_MODEL_NAME “{self.WHISPER_MODEL_NAME}”…")
+        self.get_logger().info(f"MIC_SAMPLE_RATE “{self.MIC_SAMPLE_RATE}”…")
+        self.get_logger().info(f"ENERGY_THRESHOLD “{self.ENERGY_THRESHOLD}”…")
+        self.get_logger().info(f"RECORD_TIMEOUT “{self.RECORD_TIMEOUT}”…")
+        self.get_logger().info(f"PHRASE_TIMEOUT “{self.PHRASE_TIMEOUT}”…")
+        
         # Whisper 모델
         self.get_logger().info(f"Loading Whisper model “{self.WHISPER_MODEL_NAME}”…")
         self.model = whisper.load_model(self.WHISPER_MODEL_NAME)
@@ -198,7 +204,7 @@ class SpeechToCmd(Node):
 
         while rclpy.ok():
             try:
-                play_audio("models/temp/start_recording.ogg")
+                play_audio("models/temp/start_recording.wav")
                 self.get_logger().info("Recording…")
 
                 stt_result = self.stt_client.transcribe_once_base()
@@ -207,10 +213,12 @@ class SpeechToCmd(Node):
                     continue
 
                 stt_key = stt_result.replace(" ", "")
+                stt_key = stt_key.replace("차자", "찾아")
                 self.get_logger().info(f"STT result: “{stt_key}”")
-                play_audio("models/temp/stop_recording.ogg")
+                play_audio("models/temp/stop_recording.wav")
 
                 if stt_key in self.commands:
+                    self.get_logger().info("matched and play!")
                     play_audio("models/temp/recognized.ogg")
                     info = self.commands[stt_key]
 
