@@ -4,7 +4,7 @@ GDH (GuideDog HRI) module packages
 # 1. 소개
 [GuideDog](https://github.com/GuideDog-ETRI) 과제의 HRI파트 설치 문서이다. gdh_package (static object detection service), gdh_image (test image publisher), gdh_speech_audio (STT와 TTS), gdh_vlm_client (SA-VLM의 client 파트)로 구성되어있다.
 
-# 2. 설치
+# 2. 설치입니다.
 ## 2.1. gdh_packages, gdh_speech_audio
 - Move to the workspace folder (assume its as ~/Desktop/gdh)
     ```bash
