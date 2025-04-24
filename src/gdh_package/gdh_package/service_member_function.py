@@ -91,8 +91,7 @@ class GDHService(Node):
         self.bridge = CvBridge()
         self.subscription  # prevent unused variable warning
         self.latest_ricoh_erp_image = None
-        self.image_queue = queue.Queue(maxsize=1)
-
+        
         # service type(in/out params), name, callback func.
         self.srv_init_detector = self.create_service(GDHInitializeDetectStaticObject, '/GDH_init_detect', self.init_detector)
         self.srv_term_detector = self.create_service(GDHTerminateDetectStaticObject, '/GDH_term_detect', self.term_detector)
@@ -219,12 +218,10 @@ class GDHService(Node):
 
     # image
     def listener_callback_ricoh_comprssed(self, msg):
-        try:
-            # 큐가 비어 있으면 넣고, 가득 차면 맨 앞 프레임 제거 후 넣기
-            self.image_queue.put(msg.data, block=False)
-        except queue.Full:
-            _ = self.image_queue.get(block=False)
-            self.image_queue.put(msg.data, block=False)
+        # compressed image to numpy
+        np_arr = np.frombuffer(msg.data, np.uint8)
+        self.latest_ricoh_erp_image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)    # nparray is returned
+        # self.get_logger().info(f'listener_callback: msg latest_ricoh_erp_image size {self.latest_ricoh_erp_image.shape}')
     
     def get_rectified_ricoh_images(self, htheta_list, vtheta_list, hfov, vfov):        
         res_imgs = []
@@ -785,16 +782,6 @@ class GDHService(Node):
 
         try:
             while not self.shutdown_event.is_set():
-                try:
-                    raw_bytes = self.image_queue.get(block=False)
-                except queue.Empty:
-                    continue
-                    
-                # compressed image to numpy
-                np_arr = np.frombuffer(raw_bytes, np.uint8)        
-                self.latest_ricoh_erp_image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)    # nparray is returned
-                self.get_logger().debug(f'detect_loop: msg latest_ricoh_erp_image size {self.latest_ricoh_erp_image.shape}')
-        
                 res, list_imgs = self.get_rectified_ricoh_images(
                     htheta_list=self.htheta_list, 
                     vtheta_list=self.vtheta_list,
@@ -886,14 +873,14 @@ class GDHService(Node):
                             # cv2.destroyAllWindows()
                             black_np_img = np.zeros((480, 640, 3), dtype=np.uint8)
                             
-                        self.get_logger().info(f'Passing detect_loop, black_np_img: {black_np_img.shape}')
+                        # self.get_logger().info(f'Passing detect_loop, black_np_img: {black_np_img.shape}')
                         cv2.imshow('Detection Result', black_np_img)
                         cv2.waitKey(1)
 
-                self.get_logger().info(f'=======================================================')
+                # self.get_logger().info(f'=======================================================')
                         
                 # 종료 이벤트 또는 슬립 지속 시간을 대기
-                self.get_logger().info('Sleeping for %s seconds' % sleep_duration)
+                # self.get_logger().info('Sleeping for %s seconds' % sleep_duration)
                 self.shutdown_event.wait(timeout=sleep_duration)
         except Exception as e:
             # 루프 내에서 발생하는 예외를 로그로 남김
