@@ -23,6 +23,8 @@ import cv2
 import threading
 import math
 
+import queue
+
 # Yolo-world
 from ultralytics import YOLOWorld
 
@@ -89,7 +91,7 @@ class GDHService(Node):
         self.bridge = CvBridge()
         self.subscription  # prevent unused variable warning
         self.latest_ricoh_erp_image = None
-        self.latest_rgb_raw_image = None
+        self.image_queue = queue.Queue(maxsize=1)
 
         # service type(in/out params), name, callback func.
         self.srv_init_detector = self.create_service(GDHInitializeDetectStaticObject, '/GDH_init_detect', self.init_detector)
@@ -203,7 +205,7 @@ class GDHService(Node):
         if self.detecting:
             status_msg.errcode = self.heartbeats_det_errcode
         else:
-            if self.latest_ricoh_erp_image is None and self.latest_rgb_raw_image is None:
+            if self.latest_ricoh_erp_image is None:
                 status_msg.errcode = status_msg.ERR_NO_IMAGE    # No Images in all image containers
 
                 self.subscription = self.handle_subs_ricoh_comp()
@@ -217,12 +219,13 @@ class GDHService(Node):
 
     # image
     def listener_callback_ricoh_comprssed(self, msg):
-        # compressed image to numpy
-        np_arr = np.frombuffer(msg.data, np.uint8)        
-        self.latest_ricoh_erp_image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)    # nparray is returned
-        # self.get_logger().info(f'listener_callback: msg latest_ricoh_erp_image size {self.latest_ricoh_erp_image.shape}')
+        try:
+            # 큐가 비어 있으면 넣고, 가득 차면 맨 앞 프레임 제거 후 넣기
+            self.image_queue.put(msg.data, block=False)
+        except queue.Full:
+            _ = self.image_queue.get(block=False)
+            self.image_queue.put(msg.data, block=False)
     
-
     def get_rectified_ricoh_images(self, htheta_list, vtheta_list, hfov, vfov):        
         res_imgs = []
 
@@ -232,27 +235,15 @@ class GDHService(Node):
 
             if not isinstance(vtheta_list, list):
                 vtheta_list = [vtheta_list]
-        
-            ricohz_erp_image = np.copy(self.latest_ricoh_erp_image)
-
+            
             for htheta, vtheta in zip(htheta_list, vtheta_list):
-                # htheta_for_converter = htheta - 180
-
-                # if htheta_for_converter < -180:
-                    # htheta_for_converter += 360
-
-                # planar_image = self.convert_to_planar(ricohz_erp_image, fov_deg=(hfov, vfov), 
-                #                                       u_deg=htheta_for_converter, v_deg=vtheta, out_hw=(self.convert_to_planar_out_h, self.convert_to_planar_out_w))
-                                                    
-                ###
-                self.get_logger().info(f'erp_to_rect args: ricohz_erp_image: {ricohz_erp_image.shape}, fov_deg_hv: ({hfov}, {vfov}), htheta: {htheta}')
-                planar_image = erp_to_rect(erp_image=ricohz_erp_image, 
+                self.get_logger().debug(f'erp_to_rect args: self.latest_ricoh_erp_image: {self.latest_ricoh_erp_image.shape}, fov_deg_hv: ({hfov}, {vfov}), htheta: {htheta}')
+                planar_image = erp_to_rect(erp_image=self.latest_ricoh_erp_image, 
                                            theta=np.deg2rad(htheta),
                                            hfov=np.deg2rad(hfov),
                                            vfov=np.deg2rad(vfov)
                                           )
-                self.get_logger().info(f'erp_to_rect outs: planar_image: {planar_image.shape}')
-                ###                                   
+                self.get_logger().debug(f'erp_to_rect outs: planar_image: {planar_image.shape}')
                                                       
                 res_imgs.append(planar_image)
 
@@ -794,6 +785,16 @@ class GDHService(Node):
 
         try:
             while not self.shutdown_event.is_set():
+                try:
+                    raw_bytes = self.image_queue.get(block=False)
+                except queue.Empty:
+                    continue
+                    
+                # compressed image to numpy
+                np_arr = np.frombuffer(raw_bytes, np.uint8)        
+                self.latest_ricoh_erp_image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)    # nparray is returned
+                self.get_logger().debug(f'detect_loop: msg latest_ricoh_erp_image size {self.latest_ricoh_erp_image.shape}')
+        
                 res, list_imgs = self.get_rectified_ricoh_images(
                     htheta_list=self.htheta_list, 
                     vtheta_list=self.vtheta_list,
@@ -886,12 +887,13 @@ class GDHService(Node):
                             black_np_img = np.zeros((480, 640, 3), dtype=np.uint8)
                             
                         self.get_logger().info(f'Passing detect_loop, black_np_img: {black_np_img.shape}')
-                        self.get_logger().info(f'=======================================================')
                         cv2.imshow('Detection Result', black_np_img)
                         cv2.waitKey(1)
 
+                self.get_logger().info(f'=======================================================')
+                        
                 # 종료 이벤트 또는 슬립 지속 시간을 대기
-                self.get_logger().debug('Sleeping for %s seconds' % sleep_duration)
+                self.get_logger().info('Sleeping for %s seconds' % sleep_duration)
                 self.shutdown_event.wait(timeout=sleep_duration)
         except Exception as e:
             # 루프 내에서 발생하는 예외를 로그로 남김
