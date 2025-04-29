@@ -738,6 +738,8 @@ class GDHService(Node):
         return img_with_point_np
 
     def start_detect_object(self, request, response):
+        self.get_logger().info(f'Incoming request @ start_detect_object, {request}')
+        
         if self.yolo_model is None:
             self._init_detector()   # load model from pt file
 
@@ -764,9 +766,12 @@ class GDHService(Node):
                 response.success = False
                 response.message = 'Detection is already running.'
         
+        self.get_logger().info(f'                                       response: {response}')
+            
         return response
 
     def stop_detect_object(self, request, response):
+        self.get_logger().info(f'Incoming request @ stop_detect_object, {request}')
         if self.detecting:
             self.detecting = False
             response.success = True
@@ -775,6 +780,8 @@ class GDHService(Node):
             response.success = False
             response.message = 'Detection is not running.'
 
+        self.get_logger().info(f'                                       response: {response}')
+            
         return response
         
     def detect_loop(self):
@@ -830,16 +837,6 @@ class GDHService(Node):
                             dets_msg.errcode = dets_msg.ERR_NONE_AND_FIND_SUCCESS
                         else:
                             dets_msg.errcode = dets_msg.ERR_NONE_AND_FIND_FAILURE
-                    
-                        self.get_logger().info(
-                            'Set dets_msg\n\terrcode: %d,  %d(UNKNOWN), %d(FIND_FAIL), %d(FIND_SUCCESS)' % 
-                            (
-                                dets_msg.errcode, 
-                                dets_msg.ERR_UNKNOWN, 
-                                dets_msg.ERR_NONE_AND_FIND_FAILURE, 
-                                dets_msg.ERR_NONE_AND_FIND_SUCCESS
-                            )
-                        )
                     else:
                         # 이미지를 받지 못한 경우
                         self.get_logger().info('No image for detection')
@@ -853,17 +850,18 @@ class GDHService(Node):
                         cv2.imshow('Detection Result', combined_np_img)
                         cv2.waitKey(1)
 
-                    # set heartbeats error code
-                    self.heartbeats_det_errcode = dets_msg.errcode
+                    if self.detecting:		# check one more time before publishing message
+                        # set heartbeats error code
+                        self.heartbeats_det_errcode = dets_msg.errcode
                     
-                    # 결과를 Image 메시지로 변환하여 퍼블리시       
-                    self.get_logger().debug('Convert np to ros image')    
-                    dets_ros_img = self.numpy_to_ros_image(combined_np_img)
+                        # 결과를 Image 메시지로 변환하여 퍼블리시       
+                        self.get_logger().debug('Convert np to ros image')    
+                        dets_ros_img = self.numpy_to_ros_image(combined_np_img)
                     
-                    self.get_logger().info('Publish dets_msg and dets_ros_img')
-                    self.get_logger().info(f'{dets_msg}')
-                    self.publisher_detect.publish(dets_msg)
-                    self.publisher_detect_img.publish(dets_ros_img)
+                        self.get_logger().info('Publish dets_msg and dets_ros_img')
+                        self.get_logger().info(f'{dets_msg}')
+                        self.publisher_detect.publish(dets_msg)
+                        self.publisher_detect_img.publish(dets_ros_img)
                 else:
                     # self.get_logger().info('Passing detect_loop')
                     if self.debug_display_yolo:
