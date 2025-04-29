@@ -39,6 +39,8 @@ from PIL import Image as PilImage
 # yaml
 import yaml
 
+import time
+
 from .erp_rectify_fast_caching import erp_to_rect
 
 # Object type and status
@@ -789,15 +791,26 @@ class GDHService(Node):
 
         try:
             while not self.shutdown_event.is_set():
+                loop_start = time.time()
+                
+                # 1) ERP → Rectified
+                t0 = time.time()
                 res, list_imgs = self.get_rectified_ricoh_images(
                     htheta_list=self.htheta_list, 
                     vtheta_list=self.vtheta_list,
                     hfov=self.hfov, 
                     vfov=self.vfov
                 )
+                t1 = time.time()
+                
+                det_msg_publish_time = 0.0
+                ros_img_convert_time = 0.0
+                processing_time = 0.0
+                
                 if self.detecting:
                     self.get_logger().debug('Detecting loop start')
-                    # dets_msg
+                    
+                    # init. dets_msg
                     dets_msg = GDHDetections()
                     header = Header()
                     header.stamp = self.get_clock().now().to_msg()  # 현재 시간
@@ -806,6 +819,9 @@ class GDHService(Node):
                     dets_msg.detections = []
                     
                     if res:
+                        # 2) 후처리 & 탐지
+                        t2 = time.time()
+                        
                         list_img_infos = []
                         for idx, img in enumerate(list_imgs):
                             img_infos = {
@@ -822,7 +838,9 @@ class GDHService(Node):
                         dets_msg, combined_np_img = self.detect_common_and_draw_gp(
                             dets_msg, list_imgs, list_img_infos
                         )
-
+                        t3 = time.time()
+                        
+                        # 3) filtering the detection results
                         if self.detect_object_types == self.all_object_type_id:
                             detections_filtered = dets_msg.detections
                         else:
@@ -830,13 +848,14 @@ class GDHService(Node):
                                 item for item in dets_msg.detections 
                                 if int(item.obj_type) in [self.detect_object_types] and int(item.obj_type) != 254
                             ]
-                            
                         dets_msg.detections = detections_filtered
 
+                        # 4) errcode 설정
                         if len(dets_msg.detections) > 0:
                             dets_msg.errcode = dets_msg.ERR_NONE_AND_FIND_SUCCESS
                         else:
                             dets_msg.errcode = dets_msg.ERR_NONE_AND_FIND_FAILURE
+                        t4_1 = time.time()
                     else:
                         # 이미지를 받지 못한 경우
                         self.get_logger().info('No image for detection')
@@ -844,24 +863,50 @@ class GDHService(Node):
                         
                         # combined_np_img = np.zeros((10, 10, 3), dtype=np.uint8)
                         combined_np_img = np.ones((480, 640, 3), dtype=np.uint8) * 255
+                        t3 = t4_1 = time.time()
 
                     if self.debug_display_yolo:
                         # cv2.putText(empty_img, 'No image', (50, 150), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
                         cv2.imshow('Detection Result', combined_np_img)
                         cv2.waitKey(1)
+                        
+                    t4_2 = time.time()
 
                     if self.detecting:		# check one more time before publishing message
-                        # set heartbeats error code
-                        self.heartbeats_det_errcode = dets_msg.errcode
-                    
+                        t5 = time.time()
                         # 결과를 Image 메시지로 변환하여 퍼블리시       
                         self.get_logger().debug('Convert np to ros image')    
                         dets_ros_img = self.numpy_to_ros_image(combined_np_img)
+                        t6 = time.time()
+                        
+                        # set heartbeats error code and publish
+                        self.heartbeats_det_errcode = dets_msg.errcode
                     
                         self.get_logger().info('Publish dets_msg and dets_ros_img')
-                        self.get_logger().info(f'{dets_msg}')
+                        self.get_logger().info(f'                      {dets_msg}')
                         self.publisher_detect.publish(dets_msg)
                         self.publisher_detect_img.publish(dets_ros_img)
+                        t7 = time.time()
+                        
+                        # 기록
+                        durations = {
+                            'erp_to_rect': (t1 - t0) * 1000,
+                            'detection': (t3 - t2) * 1000,
+                            'filtering_detection': (t4_1 - t3) * 1000,
+                            'imshow': (t4_2 - t4_1) * 1000,
+                            'ros_convert': (t6 - t5) * 1000,
+                            'publish': (t7 - t6) * 1000,
+                            'total_loop': (t7 - loop_start) * 1000
+                        }
+                        self.get_logger().info(
+                            f"Timing (ms): ERP_RECT={durations['erp_to_rect']:.1f}, "
+                            f"DETECT={durations['detection']:.1f}, "
+                            f"FILTER={durations['filtering_detection']:.1f}, "
+                            f"IMSHOW={durations['imshow']:.1f}, "
+                            f"ROS_CONV={durations['ros_convert']:.1f}, "
+                            f"PUBLISH={durations['publish']:.1f}, "
+                            f"TOTAL={durations['total_loop']:.1f}"
+                        )
                 else:
                     # self.get_logger().info('Passing detect_loop')
                     if self.debug_display_yolo:
