@@ -102,7 +102,6 @@ class GDHService(Node):
         
         
         self.bridge = CvBridge()
-        self.subscription  # prevent unused variable warning
         
         self.odom_topic = conf['odom_name']
         
@@ -114,6 +113,9 @@ class GDHService(Node):
         
         self.subscription = self.handle_subs_ricoh_comp()
         self.odometry_sub = self.handle_subs_odometry()
+        
+        self.subscription  # prevent unused variable warning
+        self.odometry_sub
         
         # service type(in/out params), name, callback func.
         self.srv_init_detector = self.create_service(GDHInitializeDetectStaticObject, '/GDH_init_detect', self.init_detector)
