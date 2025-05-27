@@ -22,7 +22,8 @@ setup(
         'console_scripts': [
             # ros2 run gdh_vlm_client image_ai_node
             'convert_image_node = gdh_vlm_client.convert_image_node:main',
-            'image_ai_node = gdh_vlm_client.image_ai_node:main',
+            # 'image_ai_node = gdh_vlm_client.image_ai_node:main',
+            'image_ai_node = gdh_vlm_client.image_ai_node_fast:main',
             'toggle_flag_node = gdh_vlm_client.toggle_flag_node:main',
             'qwen_console_node = gdh_vlm_client.qwen_console_node:main'
         ],
