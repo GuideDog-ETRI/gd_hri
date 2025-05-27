@@ -76,7 +76,7 @@ class SpeechToTextClient(Node):
         self.ENERGY_THRESHOLD  = conf['openai_whisper']['ENERGY_THRESHOLD']
         self.RECORD_TIMEOUT    = conf['openai_whisper']['RECORD_TIMEOUT']
         self.PHRASE_TIMEOUT    = conf['openai_whisper']['PHRASE_TIMEOUT']
-
+        
         self.get_logger().info(f"WHISPER_MODEL_NAME “{self.WHISPER_MODEL_NAME}”…")
         self.get_logger().info(f"MIC_SAMPLE_RATE “{self.MIC_SAMPLE_RATE}”…")
         self.get_logger().info(f"ENERGY_THRESHOLD “{self.ENERGY_THRESHOLD}”…")
@@ -199,7 +199,24 @@ class SpeechToCmd(Node):
     def __init__(self):
         super().__init__("speech_to_cmd")
 
-        self.commands = self._load_commands("models/audio_cmd_list.txt")
+        # load from conf.yaml
+        path_to_config = 'models/gdh_config.yaml'
+        if os.path.exists(path_to_config):
+            with open(path_to_config) as fid:
+                conf = yaml.full_load(fid)
+        else:
+            raise AssertionError(f'No gdh_config file in {path_to_config}.')
+        
+        self.use_trigger_word = conf['STT']['use_trigger_word']
+
+        if self.use_trigger_word:
+            self.trigger_word = conf['STT']['trigger_word']
+        else:
+            self.trigger_word = None
+        self.get_logger().info(f"use_trigger_word: {self.use_trigger_word}")
+        self.get_logger().info(f"trigger_word: {self.trigger_word}")
+
+        self.commands = self._load_commands("models/audio_cmd_list.txt", self.trigger_word)
         self.publisher_cmd = self.create_publisher(UserCommand, "/GDH_user_cmd", 1)
 
         # STT
@@ -208,13 +225,22 @@ class SpeechToCmd(Node):
         self._listen_and_publish()
 
     # --- 명령 리스트 로드 ---
-    def _load_commands(self, path: str):
+    def _load_commands(self, path: str, trigger_word: str | None) -> dict:
         cmd = {}
         with open(path, "r") as f:
             for line in f.readlines():
                 key, usr_cmd, param = line.strip().split("|")
-                cmd[key.replace(" ", "")] = {"usr_cmd": usr_cmd, "cmd_param": param}
+
+                key_no_blank = key.replace(" ", "")
+                cmd[key_no_blank] = {"usr_cmd": usr_cmd, "cmd_param": param}
+
+                if trigger_word:
+                    # 트리거 단어가 있다면 트리거 단어 + 키단어를 dict에 추가
+                    key_with_trigger = f"{trigger_word}{key_no_blank}"
+                    cmd[key_with_trigger] = {"usr_cmd": usr_cmd, "cmd_param": param}
+
         self.get_logger().info(f"Loaded commands: {list(cmd.keys())}")
+
         return cmd
 
     # --- 메인 루프 ---

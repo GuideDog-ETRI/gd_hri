@@ -70,3 +70,7 @@ openai_whisper:
   ENERGY_THRESHOLD: 1000
   RECORD_TIMEOUT: 1.0
   PHRASE_TIMEOUT: 1.0
+
+STT:
+  use_trigger_word: True
+  trigger_word: "에디야"
