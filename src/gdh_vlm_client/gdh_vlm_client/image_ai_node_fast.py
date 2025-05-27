@@ -116,21 +116,6 @@ class QwenImageSubscriberNode(Node):
             self.get_logger().error(f'ZMQ initialization error: {e}')
             raise
 
-        # Load images and validate
-        self.frame_closed = cv2.imread("models/closed.jpg", cv2.IMREAD_COLOR)
-        if self.frame_closed is None:
-            self.get_logger().error('Failed to load image: models/closed.jpg')
-            raise FileNotFoundError('Image not found: models/closed.jpg')
-        else:
-            self.frame_closed = resize_with_long_side(self.frame_closed, 640)
-
-        # self.frame_opened = cv2.imread("models/opened.jpg", cv2.IMREAD_COLOR)
-        # if self.frame_opened is None:
-        #     self.get_logger().error('Failed to load image: models/opened.jpg')
-        #     raise FileNotFoundError('Image not found: models/opened.jpg')
-        # else:
-        #     self.frame_opened = resize_with_long_side(self.frame_opened, 640)
-
         self.image_lock = Lock()
         self.cv_image_resized = None
 
