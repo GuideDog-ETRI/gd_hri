@@ -6,26 +6,29 @@ camera:
    # - 180
    # - -90
    - 180
-  hfov: 90
+  hfov: 120
+  htheta_list_vlm:
+   - 180
+  hfov_vlm: 90
+
+odom_name: "/gdq/msg/gdq_odom"
+# odom_name: "/j100_0778/platform/odom/filtered"
 
 yolo_model:
-  conf_threshold: 0.5
+  conf_threshold: 0.3
   # repo: "models/gd_demo/train958/weights/best.pt"
   # resize_long_px: 1000
-  resize_long_px: 0
-  convert_to_planar:
-    # out_h: 480
-    # out_w: 640
-    out_h: 960
-    out_w: 1280
+  resize_long_px: 1440
   # resize_long_px: 640
   # repo: "models/gd_demo/train972_yolov8x/weights/best.pt"
   # repo: "models/gddemo_v2/train967_yolov8m/weights/best.pt"
   # repo: "models/gddemo_v2/train972_yolov8x/weights/best.pt"
   # repo: "models/gddemo_v2.1/yolov8x_960_gddemo_v2.1_etri_cropaug/weights/best.pt"
-  repo: "models/gddemo_v2.1/yolov8x_976_gddemo_v2.1_etri/weights/best.pt"  
+  #repo: "models/gddemo_v2.1/yolov8x_976_gddemo_v2.1_etri/weights/best.pt"
+  #repo: "models/gddemo_v2.2/train975/weights/best.pt"  
+  repo: "models/gddemo_v2.2/train975_10epoch/weights/last.pt"
   use_yoloworld: False
-  world_repo: "models/yolov8x-world.pt"
+  world_repo: "models/yoloworld/yolov8x-worldv2.pt"
 
 pub_msg:
   subway_gate_each: False
@@ -38,7 +41,8 @@ elevator_door_status:
 
 misc:
   draw_gp: False
-
+  draw_gp_vlm: True
+  
 debug:
   display_yolo: True
   display_cmd_list: False

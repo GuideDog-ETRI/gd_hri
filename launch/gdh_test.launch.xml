@@ -1,7 +1,12 @@
 <launch>
+  <!-- <node pkg="gdh_image" exec="image_publisher_node" name="image_publisher_node" output="screen"/> -->
   <!-- <node pkg="gdh_speech_audio" exec="srv_play_audio_from_msg" name="srv_play_audio_from_msg" output="screen"/> -->
-  <!-- <node pkg="gdh_speech_audio" exec="srv_play_audio_from_msg_by_m" name="srv_play_audio_from_msg_by_m" output="screen"/> -->
-  <!-- <node pkg="gdh_speech_audio" exec="pub_command_from_speech_by_w" name="pub_command_from_speech_by_w" output="screen"/> -->
   <!-- <node pkg="gdh_speech_audio" exec="gdh_node_monitor" name="gdh_node_monitor" output="screen"/> -->
+  <node pkg="gdh_speech_audio" exec="srv_play_audio_from_msg_by_m" name="srv_play_audio_from_msg_by_m" output="screen"/>
+  <node pkg="gdh_speech_audio" exec="pub_command_from_speech_by_w" name="pub_command_from_speech_by_w" output="screen"/>
   <node pkg="gdh_package" exec="service" name="service" output="screen"/>
+  <!-- <node pkg="gdh_vlm_client" exec="convert_image_node" name="convert_image_node" output="screen"/> -->
+  <node pkg="gdh_vlm_client" exec="image_ai_node" name="image_ai_node" output="screen"/>
+  <!-- <node pkg="gdh_vlm_client" exec="toggle_flag_node" name="toggle_flag_node" output="screen"/>
+  <node pkg="gdh_vlm_client" exec="qwen_console_node" name="qwen_console_node" output="screen"/> -->
 </launch>
