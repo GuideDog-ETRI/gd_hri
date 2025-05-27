@@ -22,6 +22,24 @@ def play_audio(filepath: str):
     finally:
         pygame.mixer.quit()
 
+import threading, time
+
+def play_audio_nonblocking(filepath: str):
+    def _play():
+        try:
+            print('play_audio_nonblocking_start')
+            pygame.mixer.init()
+            print('play_audio_nonblocking_inited')
+            pygame.mixer.music.load(filepath)
+            print('play_audio_nonblocking_loaded')
+            pygame.mixer.music.play()
+            print('play_audio_nonblocking_played')
+            # 최대 3초 이내에 끝날 것이므로, 여기서는 슬립으로 대체
+            time.sleep(1.0)
+        finally:
+            pygame.mixer.quit()
+            print('play_audio_nonblocking_quited')
+    threading.Thread(target=_play, daemon=True).start()
 
 import os
 import yaml
@@ -33,6 +51,8 @@ import whisper, torch
 import re
 from queue import Queue
 from datetime import datetime, timedelta
+
+
 
 class SpeechToTextClient(Node):
     """
