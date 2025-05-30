@@ -257,10 +257,13 @@ class SpeechToCmd(Node):
                 if not stt_result:
                     self.get_logger().error("STT returned nothing.")
                     continue
-
+                    
+                self.get_logger().info(f"STT result: “{stt_result}”")
                 stt_key = stt_result.replace(" ", "")
                 stt_key = stt_key.replace("차자", "찾아")
-                self.get_logger().info(f"STT result: “{stt_key}”")
+                stt_key = stt_key.replace("쳐자", "찾아")
+                stt_key = stt_key.replace("애디", "에디")
+                
                 play_audio("models/temp/stop_recording.wav")
 
                 if stt_key in self.commands:
