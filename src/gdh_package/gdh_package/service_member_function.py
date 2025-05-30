@@ -48,6 +48,11 @@ from threading import Lock
 
 from .erp_rectify_fast_caching import erp_to_rect
 
+from rclpy.callback_groups import (
+    ReentrantCallbackGroup,             # 동시에 여러 콜백 허용
+    MutuallyExclusiveCallbackGroup      # 그룹 안에서는 1개만
+)
+
 # Object type and status
 from enum import IntEnum
 from ctypes import c_uint8
@@ -78,6 +83,11 @@ class GDHService(Node):
     def __init__(self):
         super().__init__('gdh_service')     # node_name
 
+        # ① 콜백 그룹 객체 생성
+        self.cb_srv   = ReentrantCallbackGroup()          # 모든 서비스
+        self.cb_timer = MutuallyExclusiveCallbackGroup()  # 하트비트 타이머
+        self.cb_subs  = MutuallyExclusiveCallbackGroup()  # 이미지·오도메트리
+
         # load from conf.yaml
         path_to_config = 'models/gdh_config.yaml'
         if os.path.exists(path_to_config):
@@ -90,12 +100,11 @@ class GDHService(Node):
         assert self.input_type == 'ricoh_comp'
         # 'rgb_raw': for testing GDH individual functions. Image are published from folders.
         # 'ricoh_raw': for testing ROS communications of GDH
-        # 'rocoh_comp': for deployment
+        # 'ricoh_comp': for deployment
         
         # Locks
         self.detect_flag_lock = Lock()
         self.odom_lock = Lock()
-        self.erp_image_lock = Lock()
         
         
         self.bridge = CvBridge()
@@ -113,20 +122,30 @@ class GDHService(Node):
         
         self.subscription  # prevent unused variable warning
         self.odometry_sub
+
+        self.last_image_received_time = None  # 최근 이미지 수신 시각
+        self.last_odom_received_time = None  # 최근 odom 수신 시각
         
         # service type(in/out params), name, callback func.
+        self.topic_name_get_gp = '/get_image_gp'
+        self.get_point_client = self.create_client(GDGGetImageGuidancePoint, self.topic_name_get_gp)
+
         self.srv_init_detector = self.create_service(GDHInitializeDetectStaticObject, '/GDH_init_detect', self.init_detector)
         self.srv_term_detector = self.create_service(GDHTerminateDetectStaticObject, '/GDH_term_detect', self.term_detector)
 
         self.srv_explain_pathgp = self.create_service(GDHExplainPathGP, '/GDH_explain_path_to_gp', self.explain_path_to_gp)
         
-        self.srv_start_detect_target = self.create_service(GDHStartDetectObject, '/GDH_start_detect', self.start_detect_object)
-        self.srv_stop_detect_target = self.create_service(GDHStopDetectObject, '/GDH_stop_detect', self.stop_detect_object)
+        self.srv_start_detect_target = self.create_service(GDHStartDetectObject, 
+                                                           '/GDH_start_detect', 
+                                                           self.start_detect_object,
+                                                           callback_group=self.cb_srv)
+        self.srv_stop_detect_target = self.create_service(GDHStopDetectObject, 
+                                                          '/GDH_stop_detect', 
+                                                          self.stop_detect_object,
+                                                          callback_group=self.cb_srv)
         self.publisher_detect = self.create_publisher(GDHDetections, '/GDH_detections', 10)
         self.publisher_detect_img = self.create_publisher(Image, '/GDH_detections_img', 10)
         self.detecting = False
-        self.thread = None
-        self.shutdown_event = threading.Event()  # Event to signal shutdown
         
         # Forward is 180 in GDG
         self.cam_id_ricoh = conf['camera']['id']
@@ -158,7 +177,9 @@ class GDHService(Node):
         # heartbeat status - yochin: temporary disabled to test scenario
         self.heartbeats_det_errcode = GDHStatus.ERR_NONE  # 오류 없음
         self.publisher_status = self.create_publisher(GDHStatus, '/GDH_status', 1)
-        self.timer = self.create_timer(timer_period_sec=1.0, callback=self.timer_callback)
+        self.timer = self.create_timer(timer_period_sec=1.0, 
+                                       callback=self.timer_callback,
+                                       callback_group=self.cb_timer)
 
         # classify door status (open / close) with depth estimation
         self.check_door_status = conf['elevator_door_status']['do_check']
@@ -178,22 +199,11 @@ class GDHService(Node):
         if self.yolo_model is None:
             self._init_detector()   # load model from pt file
 
-        if self.thread is None or not self.thread.is_alive():  # 스레드가 없거나 종료된 상태인지 확인
-            self.detecting = False
-            self.shutdown_event.clear()  # Clear shutdown event before starting
-            self.thread = threading.Thread(target=self.detect_loop)
-            self.thread.start()
-
         self.get_logger().info(f"End of the GDH.__init__")
 
     def destroy_node(self):
         self.get_logger().info('Node is shutting down, stopping detection thread if running.')
         self.detecting = False
-        self.shutdown_event.set()
-        if self.thread is not None and self.thread.is_alive():
-            self.thread.join(timeout=5)
-            if self.thread.is_alive():
-                self.get_logger().warn('Detection thread did not exit in time during node shutdown.')
         
         self._term_detector()
 
@@ -207,21 +217,22 @@ class GDHService(Node):
             Odometry, 
             self.odom_topic,
             self.odometry_callback,
-            qos_profile=qos_profile)
+            qos_profile=qos_profile,
+            callback_group=self.cb_subs)
         
         return subscription
 
     def handle_subs_ricoh_comp(self):
-        qos_profile = QoSProfile(depth=1)
+        qos_profile = QoSProfile(depth=2)
         # Compressed ERP Image        
         qos_profile.reliability = QoSReliabilityPolicy.BEST_EFFORT     
         subscription = self.create_subscription(
             CompressedImage, '/theta/image_raw/compressed',
             self.listener_callback_ricoh_comprssed,
-            qos_profile=qos_profile)
+            qos_profile=qos_profile,
+            callback_group=self.cb_subs)
         
         return subscription
-    
     
     # Heartbeat
     def timer_callback(self):
@@ -233,20 +244,32 @@ class GDHService(Node):
         status_msg = GDHStatus()
         status_msg.header = header
 
-        if self.detecting:
-            status_msg.errcode = self.heartbeats_det_errcode
+        now = time.time()
+        img_timeout_sec = 5.0
+
+        # 콜백 확인
+        if self.last_odom_received_time is None or (now - self.last_odom_received_time) > img_timeout_sec:
+            self.get_logger().warn(f"[HEARTBEAT] Odometry not received in {img_timeout_sec} sec.")
+            if self.odometry_sub is not None:
+                self.destroy_subscription(self.odometry_sub)
+                self.get_logger().info(f"[HEARTBEAT] Destroyed previous odometry subscription.")
+            self.odometry_sub = self.handle_subs_odometry()
+            self.get_logger().info(f"[HEARTBEAT] Re-subscribed to odometry topic.")
+
+        if self.last_image_received_time is None or (now - self.last_image_received_time) > img_timeout_sec:
+            self.get_logger().warn(f"[HEARTBEAT] Image not received in {img_timeout_sec} sec. Resubscribing.")
+            if self.subscription is not None:
+                self.destroy_subscription(self.subscription)
+                self.get_logger().info(f"[HEARTBEAT] Destroyed previous image subscription.")
+            self.subscription = self.handle_subs_ricoh_comp()
+            self.get_logger().warn(f"[HEARTBEAT] Re-subscribed to image topic due to timeout.")
+            status_msg.errcode = status_msg.ERR_NO_IMAGE
         else:
-            if self.latest_ricoh_erp_image is None:
-                status_msg.errcode = status_msg.ERR_NO_IMAGE
-                self.subscription = self.handle_subs_ricoh_comp()
-                self.get_logger().info(f"Try to subscribing image in timer_callback!")
+            if self.detecting:
+                status_msg.errcode = self.heartbeats_det_errcode
             else:
                 status_msg.errcode = status_msg.ERR_NONE  # 오류 없음
                 
-        if self.odom is None:
-            self.odometry_sub = self.handle_subs_odometry()
-            self.get_logger().info(f"Try to subscribing odometry in timer_callback!")
-
         self.publisher_status.publish(status_msg)
         self.get_logger().info(f"Publishing GDH status: timestamp={status_msg.header.stamp.sec}, errcode={status_msg.errcode}")
 
@@ -254,6 +277,8 @@ class GDHService(Node):
     def odometry_callback(self, msg):
         with self.odom_lock:
             self.odom = copy.deepcopy(msg)
+
+        self.last_odom_received_time = time.time()
         
         self.odom_cnt += 1
         
@@ -266,9 +291,128 @@ class GDHService(Node):
         # compressed image to numpy
         np_arr = np.frombuffer(msg.data, np.uint8)
         img_decoded = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)    # nparray is returned
+
+        self.last_image_received_time = time.time()
+
+        with self.detect_flag_lock:
+            if not self.detecting:
+                self.get_logger().debug("Detection is disabled, skipping image.")
+                return
+            
+        loop_start = time.time()
+
+        with self.odom_lock:
+            if self.odom is not None:
+                self.yolo_odom = copy.copy(self.odom)
+
+        # 1) ERP → Rectified
+        t0 = time.time()
+
+        res, list_imgs = self.get_rectified_ricoh_images(
+            img_decoded,
+            htheta_list=self.htheta_list, 
+            vtheta_list=self.vtheta_list,
+            hfov=self.hfov, 
+            vfov=self.vfov)
+        t1 = time.time()
         
-        with self.erp_image_lock:
-            self.latest_ricoh_erp_image = img_decoded
+        if not res:
+            self.get_logger().warn("Failed to rectify image, skipping detection.")
+            return
+        
+        self.get_logger().debug('Detecting loop start')
+        
+        # 2) 후처리 & 탐지
+        t2 = time.time()
+        
+        list_img_infos = []
+        for idx, img in enumerate(list_imgs):
+            img_infos = {
+                'cam_id': self.cam_id_ricoh,
+                'img_w': img.shape[1],
+                'img_h': img.shape[0],
+                'htheta': self.htheta_list[idx],
+                'vtheta': self.vtheta_list[idx],
+                'hfov': self.hfov,
+                'vfov': self.vfov
+            }
+            list_img_infos.append(img_infos)
+        
+        # init. dets_msg
+        dets_msg = GDHDetections()
+        header = Header()
+        header.stamp = self.get_clock().now().to_msg()  # 현재 시간
+        header.frame_id = "none"
+        dets_msg.header = header
+        dets_msg.detections = []
+        
+        dets_msg, combined_np_img = self.detect_common_and_draw_gp(
+            dets_msg, list_imgs, list_img_infos
+        )
+        
+        if self.yolo_odom is not None:
+            self.get_logger().info(f'yolo_odom is inserted into pub_msg! {self.yolo_odom}')
+            dets_msg.odometry = self.yolo_odom
+        else:
+            self.get_logger().debug(f'yolo_odom is not inserted as it is None')
+                    
+        with self.detect_flag_lock:
+            detecting2 = self.detecting
+
+        if detecting2: # check one more time before publishing message(self.detect_object_types = request.object_types)
+            t3 = time.time()
+            
+            # 3) filtering the detection results
+            if self.detect_object_types == self.all_object_type_id:
+                detections_filtered = dets_msg.detections
+            else:
+                detections_filtered = [
+                    item for item in dets_msg.detections 
+                    if int(item.obj_type) in [self.detect_object_types] and int(item.obj_type) != 254
+                ]
+            dets_msg.detections = detections_filtered
+
+            # 4) errcode 설정
+            if len(dets_msg.detections) > 0:
+                dets_msg.errcode = dets_msg.ERR_NONE_AND_FIND_SUCCESS
+            else:
+                dets_msg.errcode = dets_msg.ERR_NONE_AND_FIND_FAILURE
+
+            t4 = time.time()
+            
+            # set heartbeats error code and publish
+            self.heartbeats_det_errcode = dets_msg.errcode
+        
+            self.get_logger().info('Publish dets_msg and dets_ros_img')
+            self.get_logger().info(f'                      {dets_msg}')
+            self.publisher_detect.publish(dets_msg)
+            t7 = time.time()
+                                    
+            t5 = time.time()
+            # 결과를 Image 메시지로 변환하여 퍼블리시       
+            self.get_logger().debug('Convert np to ros image')    
+            dets_ros_img = self.numpy_to_ros_image(combined_np_img)
+            self.publisher_detect_img.publish(dets_ros_img)
+            t6 = time.time()
+            
+            # 기록
+            durations = {
+                'erp_to_rect': (t1 - t0) * 1000,
+                'detection': (t3 - t2) * 1000,
+                'filtering_detection': (t4 - t3) * 1000,
+                'publish': (t7 - t4) * 1000,
+                'ros_convert_and_publish': (t6 - t5) * 1000,
+                'total_loop': (t6 - loop_start) * 1000
+            }
+            self.get_logger().info(
+                f"Timing (ms): ERP_RECT={durations['erp_to_rect']:.1f}, "
+                f"DETECT={durations['detection']:.1f}, "
+                f"FILTER={durations['filtering_detection']:.1f}, "
+                f"ROS_CONV={durations['ros_convert_and_publish']:.1f}, "
+                f"PUBLISH={durations['publish']:.1f}, "
+                f"TOTAL={durations['total_loop']:.1f}"
+            )
+            
     
     def get_rectified_ricoh_images(self, erp_copy, htheta_list, vtheta_list, hfov, vfov):        
         res_imgs = []
@@ -712,9 +856,11 @@ class GDHService(Node):
             np_result = result.plot()
 
             if self.testing_w_GDG:
-                # 서비스 클라이언트가 아직 생성되지 않았다면 생성
-                if self.get_point_client is None:
-                    self.get_point_client = self.create_client(GDGGetImageGuidancePoint, '/get_image_gp')
+                # # 서비스 클라이언트가 아직 생성되지 않았다면 생성
+                # if self.get_point_client is None:
+                #     self.get_point_client = self.create_client(GDGGetImageGuidancePoint, self.topic_name_get_gp)
+                
+                if self.get_point_client:
                     try:
                         self.get_logger().info('Trying to create_client with srv name, GDG - get_image_gp')
                         if not self.get_point_client.wait_for_service(timeout_sec=1.0):
@@ -741,17 +887,23 @@ class GDHService(Node):
                     # 서비스 호출
                     try:
                         self.get_logger().info(f'Trying to get_point_client!')
-                        # future = self.get_point_client.call_async(srv_request)
-                        # rclpy.spin_until_future_complete(self, future)
-                        # response = future.result()
-                        response = self.get_point_client.call(srv_request)
 
-                        if response.errcode == response.ERR_NONE:
-                            # Draw the point on the combined image
-                            np_result = self.draw_point_on_image(np_result, response.x, response.y)
-                            self.get_logger().info(f'Success to draw guidance point, {response.x}, {response.y}')
+                        # response = self.get_point_client.call(srv_request)
+
+                        future = self.get_point_client.call_async(srv_request)
+                        rclpy.spin_until_future_complete(self, future, timeout_sec=1.0)
+
+                        if future.done():
+                            response = future.result()
+
+                            if response.errcode == response.ERR_NONE:
+                                # Draw the point on the combined image
+                                np_result = self.draw_point_on_image(np_result, response.x, response.y)
+                                self.get_logger().info(f'Success to draw guidance point, {response.x}, {response.y}')
+                            else:
+                                self.get_logger().warn(f'Failed to get drawable guidance point: {response.errcode}')
                         else:
-                            self.get_logger().warn(f'Failed to get drawable guidance point: {response.errcode}')
+                            self.get_logger().warn("Guidance point service call timed out.")
                     except Exception as e:
                         self.get_logger().error(f'Failed to call guidance point service: {str(e)}')
 
@@ -832,35 +984,25 @@ class GDHService(Node):
     def start_detect_object(self, request, response):
         self.get_logger().info(f'Incoming request @ start_detect_object, {request}')
         
-        if self.yolo_model is None:
-            self._init_detector()   # load model from pt file
-
-        if self.thread is None or not self.thread.is_alive():  # 스레드가 없거나 종료된 상태인지 확인
-            with self.detect_flag_lock:
-                self.detecting = False
-            self.shutdown_event.clear()  # Clear shutdown event before starting
-            self.thread = threading.Thread(target=self.detect_loop)
-            self.thread.start()
-        
-        if self.yolo_model is None:
+        if self.yolo_model is None and not self._init_detector():
+            self.get_logger().error(f'                                       self.yolo_model is None')
             response.success = False
             response.message = 'Cannot initialize detector.'
-        elif self.thread is None or not self.thread.is_alive():  # 스레드가 없거나 종료된 상태인지 확인
-            response.success = False
-            response.message = 'Cannot start detecting thread.'
-        else:
-            with self.detect_flag_lock:
-                if not self.detecting:
-                    self.detect_object_types = request.object_types
-                    self.detecting = True
+            return response
 
-                    response.success = True
-                    response.message = f'Detection started with {self.detect_object_types}.'
-                else:
-                    self.detect_object_types = request.object_types
-            
-                    response.success = True
-                    response.message = f'Detection target is changed to {self.detect_object_types}.'
+        with self.detect_flag_lock:
+            self.get_logger().info(f'                                       self.detecting: {self.detecting}')
+            if not self.detecting:
+                self.detect_object_types = request.object_types
+                self.detecting = True
+
+                response.success = True
+                response.message = f'Detection started with {self.detect_object_types}.'
+            else:
+                self.detect_object_types = request.object_types
+        
+                response.success = True
+                response.message = f'Detection target is changed to {self.detect_object_types}.'
         
         self.get_logger().info(f'                                       response: {response}')
             
@@ -868,7 +1010,9 @@ class GDHService(Node):
 
     def stop_detect_object(self, request, response):
         self.get_logger().info(f'Incoming request @ stop_detect_object, {request}')
+
         with self.detect_flag_lock:
+            self.get_logger().info(f'                                       self.detecting: {self.detecting}')
             if self.detecting:
                 self.detecting = False
                 response.success = True
@@ -881,181 +1025,6 @@ class GDHService(Node):
             
         return response
         
-    def detect_loop(self):
-        sleep_duration = 0.01  # 100Hz를 위한 0.01초 슬립
-
-        try:
-            while not self.shutdown_event.is_set():
-                loop_start = time.time()
-                
-                # 1) ERP → Rectified
-                t0 = time.time()
-                
-                with self.erp_image_lock:
-                    erp_copy = None if self.latest_ricoh_erp_image is None else self.latest_ricoh_erp_image.copy()
-                    
-                with self.odom_lock:
-                    if self.odom is not None:
-                        self.yolo_odom = copy.copy(self.odom)
-    
-                if erp_copy is None:
-                    res = False
-                    list_imgs = []
-                else:
-                    res, list_imgs = self.get_rectified_ricoh_images(
-                        erp_copy,
-                        htheta_list=self.htheta_list, 
-                        vtheta_list=self.vtheta_list,
-                        hfov=self.hfov, 
-                        vfov=self.vfov)
-                t1 = time.time()
-                
-                det_msg_publish_time = 0.0
-                ros_img_convert_time = 0.0
-                processing_time = 0.0
-                
-                with self.detect_flag_lock:
-                    detecting = self.detecting
-                
-                if detecting and res:
-                    self.get_logger().debug('Detecting loop start')
-                    
-                    # init. dets_msg
-                    dets_msg = GDHDetections()
-                    header = Header()
-                    header.stamp = self.get_clock().now().to_msg()  # 현재 시간
-                    header.frame_id = "none"
-                    dets_msg.header = header
-                    dets_msg.detections = []
-                    
-                    if res:
-                        # 2) 후처리 & 탐지
-                        t2 = time.time()
-                        
-                        list_img_infos = []
-                        for idx, img in enumerate(list_imgs):
-                            img_infos = {
-                                'cam_id': self.cam_id_ricoh,
-                                'img_w': img.shape[1],
-                                'img_h': img.shape[0],
-                                'htheta': self.htheta_list[idx],
-                                'vtheta': self.vtheta_list[idx],
-                                'hfov': self.hfov,
-                                'vfov': self.vfov
-                            }
-                            list_img_infos.append(img_infos)
-
-                        dets_msg, combined_np_img = self.detect_common_and_draw_gp(
-                            dets_msg, list_imgs, list_img_infos
-                        )
-                        t3 = time.time()
-                        
-                        # 3) filtering the detection results
-                        if self.detect_object_types == self.all_object_type_id:
-                            detections_filtered = dets_msg.detections
-                        else:
-                            detections_filtered = [
-                                item for item in dets_msg.detections 
-                                if int(item.obj_type) in [self.detect_object_types] and int(item.obj_type) != 254
-                            ]
-                        dets_msg.detections = detections_filtered
-
-                        # 4) errcode 설정
-                        if len(dets_msg.detections) > 0:
-                            dets_msg.errcode = dets_msg.ERR_NONE_AND_FIND_SUCCESS
-                        else:
-                            dets_msg.errcode = dets_msg.ERR_NONE_AND_FIND_FAILURE
-                        t4_1 = time.time()
-                        
-                        if self.yolo_odom is not None:
-                            self.get_logger().info(f'yolo_odom is inserted into pub_msg! {self.yolo_odom}')
-                            dets_msg.odometry = self.yolo_odom
-                        else:
-                            self.get_logger().info(f'yolo_odom is not inserted as it is None')
-                    else:
-                        # 이미지를 받지 못한 경우
-                        self.get_logger().info('No image for detection')
-                        dets_msg.errcode = dets_msg.ERR_NO_IMAGE
-                        
-                        # combined_np_img = np.zeros((10, 10, 3), dtype=np.uint8)
-                        combined_np_img = np.ones((480, 640, 3), dtype=np.uint8) * 255
-                        t3 = t4_1 = time.time()
-                        
-                    t4_2 = time.time()
-                    
-                    with self.detect_flag_lock:
-                        detecting2 = self.detecting
-
-                    if detecting2: # check one more time before publishing message(self.detect_object_types = request.object_types)
-                        t7_1 = time.time()
-                        # set heartbeats error code and publish
-                        self.heartbeats_det_errcode = dets_msg.errcode
-                    
-                        self.get_logger().info('Publish dets_msg and dets_ros_img')
-                        self.get_logger().info(f'                      {dets_msg}')
-                        self.publisher_detect.publish(dets_msg)
-                        t7 = time.time()
-                                                
-                        t5 = time.time()
-                        # 결과를 Image 메시지로 변환하여 퍼블리시       
-                        self.get_logger().debug('Convert np to ros image')    
-                        dets_ros_img = self.numpy_to_ros_image(combined_np_img)
-                        self.publisher_detect_img.publish(dets_ros_img)
-                        t6 = time.time()
-                        
-                        # 기록
-                        durations = {
-                            'erp_to_rect': (t1 - t0) * 1000,
-                            'detection': (t3 - t2) * 1000,
-                            'filtering_detection': (t4_1 - t3) * 1000,
-                            'publish': (t7 - t7_1) * 1000,
-                            'ros_convert_and_publish': (t6 - t5) * 1000,
-                            'total_loop': (t6 - loop_start) * 1000
-                        }
-                        self.get_logger().info(
-                            f"Timing (ms): ERP_RECT={durations['erp_to_rect']:.1f}, "
-                            f"DETECT={durations['detection']:.1f}, "
-                            f"FILTER={durations['filtering_detection']:.1f}, "
-                            f"ROS_CONV={durations['ros_convert_and_publish']:.1f}, "
-                            f"PUBLISH={durations['publish']:.1f}, "
-                            f"TOTAL={durations['total_loop']:.1f}"
-                        )
-                        
-                    if self.debug_display_yolo:
-                        # cv2.putText(empty_img, 'No image', (50, 150), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-                        cv2.imshow('Detection Result', combined_np_img)
-                        cv2.waitKey(1)
-
-                else:
-                    # self.get_logger().info('Passing detect_loop')
-                    if self.debug_display_yolo:
-                        if res:
-                            black_np_img = self.combine_numpy_images(list_imgs)
-                        else:
-                            # cv2.destroyAllWindows()
-                            black_np_img = np.zeros((480, 640, 3), dtype=np.uint8)
-                            
-                        # self.get_logger().info(f'Passing detect_loop, black_np_img: {black_np_img.shape}')
-                        cv2.imshow('Detection Result', black_np_img)
-                        cv2.waitKey(1)
-
-                # self.get_logger().info(f'=======================================================')
-                        
-                # 종료 이벤트 또는 슬립 지속 시간을 대기
-                # self.get_logger().info('Sleeping for %s seconds' % sleep_duration)
-                self.shutdown_event.wait(timeout=sleep_duration)
-        except Exception as e:
-            # 루프 내에서 발생하는 예외를 로그로 남김
-            self.get_logger().error(f"Exception in detect_loop: {e}")
-            import traceback
-            self.get_logger().error(traceback.format_exc())
-        finally:
-            # 스레드 종료 시 상태 리셋
-            self.get_logger().info('Exiting detect_loop')
-            if self.debug_display_yolo:
-                cv2.destroyAllWindows()
-            self.detecting = False
-        
     def explain_path_to_gp(self, request, response):
         self.get_logger().info('TODO: not implemented\n')
         self.get_logger().info('Incoming request @ explain_path_to_gp\n\tresponse: %d' % (response.errcode))
@@ -1067,7 +1036,7 @@ class GDHService(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = GDHService()
-    executor = MultiThreadedExecutor()
+    executor = MultiThreadedExecutor(num_threads=4)
     executor.add_node(node)
     try:
         executor.spin()
