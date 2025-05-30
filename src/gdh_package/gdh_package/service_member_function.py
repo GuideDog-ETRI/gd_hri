@@ -86,7 +86,8 @@ class GDHService(Node):
         # ① 콜백 그룹 객체 생성
         self.cb_srv   = ReentrantCallbackGroup()          # 모든 서비스
         self.cb_timer = MutuallyExclusiveCallbackGroup()  # 하트비트 타이머
-        self.cb_subs  = MutuallyExclusiveCallbackGroup()  # 이미지·오도메트리
+        self.cb_subs2  = MutuallyExclusiveCallbackGroup()  # 이미지
+        self.cb_subs1  = MutuallyExclusiveCallbackGroup()  # 오도메트리
 
         # load from conf.yaml
         path_to_config = 'models/gdh_config.yaml'
@@ -218,7 +219,7 @@ class GDHService(Node):
             self.odom_topic,
             self.odometry_callback,
             qos_profile=qos_profile,
-            callback_group=self.cb_subs)
+            callback_group=self.cb_subs1)
         
         return subscription
 
@@ -230,7 +231,7 @@ class GDHService(Node):
             CompressedImage, '/theta/image_raw/compressed',
             self.listener_callback_ricoh_comprssed,
             qos_profile=qos_profile,
-            callback_group=self.cb_subs)
+            callback_group=self.cb_subs2)
         
         return subscription
     
@@ -288,6 +289,10 @@ class GDHService(Node):
     
     # image
     def listener_callback_ricoh_comprssed(self, msg):
+        with self.odom_lock:
+            if self.odom is not None:
+                self.yolo_odom = copy.deepcopy(self.odom)
+
         # compressed image to numpy
         np_arr = np.frombuffer(msg.data, np.uint8)
         img_decoded = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)    # nparray is returned
@@ -300,10 +305,6 @@ class GDHService(Node):
                 return
             
         loop_start = time.time()
-
-        with self.odom_lock:
-            if self.odom is not None:
-                self.yolo_odom = copy.copy(self.odom)
 
         # 1) ERP → Rectified
         t0 = time.time()
