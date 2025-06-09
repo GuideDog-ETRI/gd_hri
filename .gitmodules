@@ -1,0 +1,3 @@
+[submodule "src/gd_ifc_pkg"]
+	path = src/gd_ifc_pkg
+	url = https://github.com/GuideDog-ETRI/gd_ifc_pkg
