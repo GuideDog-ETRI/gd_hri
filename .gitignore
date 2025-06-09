@@ -5,7 +5,6 @@
 /models/gd_demo
 /sample_images/
 /saved_images/
-/src/gd_ifc_pkg
 src/gdh_interfaces(24.04.19).zip
 src/gdh_node/resource/gdh_node
 src/gdh_node/test/test_copyright.py
