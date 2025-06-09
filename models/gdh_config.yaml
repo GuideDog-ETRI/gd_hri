@@ -26,7 +26,9 @@ yolo_model:
   # repo: "models/gddemo_v2.1/yolov8x_960_gddemo_v2.1_etri_cropaug/weights/best.pt"
   #repo: "models/gddemo_v2.1/yolov8x_976_gddemo_v2.1_etri/weights/best.pt"
   #repo: "models/gddemo_v2.2/train975/weights/best.pt"  
-  repo: "models/gddemo_v2.2/train975_10epoch/weights/last.pt"
+  # repo: "models/gddemo_v2.2/train975_10epoch/weights/last.pt"
+  repo: "models/gddemo_v2.3/train_100/weights/last.pt"
+  #repo: "models/gddemo_v2.3/train3/weights/last.pt"
   use_yoloworld: False
   world_repo: "models/yoloworld/yolov8x-worldv2.pt"
 

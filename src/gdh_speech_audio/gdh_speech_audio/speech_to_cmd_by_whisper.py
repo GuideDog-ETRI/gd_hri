@@ -261,6 +261,7 @@ class SpeechToCmd(Node):
                 self.get_logger().info(f"STT result: “{stt_result}”")
                 stt_key = stt_result.replace(" ", "")
                 stt_key = stt_key.replace("차자", "찾아")
+                stt_key = stt_key.replace("차장", "찾아")
                 stt_key = stt_key.replace("쳐자", "찾아")
                 stt_key = stt_key.replace("애디", "에디")
                 

@@ -41,6 +41,7 @@ src/gdh_speech_audio/gdh_speech_audio/__pycache__/gdh_node_monitor.cpython-310.p
 models/gddemo_v2/
 models/gddemo_v2.1/
 models/gddemo_v2.2/
+models/gddemo_v2.3/
 models/yoloworld/
 models/whisper/
 rosbag_video_udeg0_2024_12_09-16_33_40.mp4
