@@ -1,11 +1,11 @@
 GDH (GuideDog HRI) module packages
 ==================================
 
-# 1. 소개입니다.
+# 1. 소개
 [GuideDog](https://github.com/GuideDog-ETRI) 과제의 HRI파트 설치 문서이다. gdh_package (static object detection service), gdh_image (test image publisher), gdh_speech_audio (STT와 TTS), gdh_vlm_client (SA-VLM의 client 파트)로 구성되어있다.
 
-# 2. 설치입니다.
-## 2.1. gdh_packages, gdh_speech_audio
+# 2. 설치
+## 2.1. gdh_packages, gdh_speech_audio, gdh_image, gdh_vlm_client
 - Move to the workspace folder (assume its as ~/Desktop/gdh)
     ```bash
     cd ~/Desktop/gdh
@@ -19,7 +19,6 @@ GDH (GuideDog HRI) module packages
 - To use TTS of OpenAI
     ```bash
     pip install pygame
-    pip install openai
     ```
 
 - If you have a tensorflow, we may meet un error related to tensorflow version, run below, first.
@@ -32,7 +31,7 @@ GDH (GuideDog HRI) module packages
     alias python=python3
     ```
 
-- To use STT of [ReturnZero](https://www.rtzr.ai/stt)
+- (No More Use) To use STT of [ReturnZero](https://www.rtzr.ai/stt)
     ```bash
     cd src/gdh_speech_audio/gdh_speech_audio
     ```
@@ -98,28 +97,27 @@ GDH (GuideDog HRI) module packages
     ```
 
 - To use yolo-v8 and rectify erp images (1.0.1 버전은 출력이미지를 정사각형으로 만드는 버그 있음. must use py360convert>=1.0.2)
-    ```bash
-    pip install py360convert>=1.0.2
+    ```bash    
     pip install ultralytics
     pip install numpy==1.25.0
     ```
 
-- To use depth estimation
+- (No more use) To use depth estimation
     ```bash
     pip install transformers
     ```
 
 - Download Yolo models (gddemo_v2.1 version) from [Google drive](https://drive.google.com/drive/folders/1DFF6rFE7NYYMgBKvXmN59T1wD3KD05Tb?usp=sharing) or [GD Server](\\129.254.81.123\GuideDog_NAS\50_DB\gdh_src\models) and place in the folder /models.
 
-- Create /src/gdh_speech_audio/gdh_speech_audio/key_wallet.py file.
+- ~~Create /src/gdh_speech_audio/gdh_speech_audio/key_wallet.py file.~~
 
-- Orin에 설치할 경우, 다음 사항들을 추가해야 함
-    - Orin에서 동작하는 버전의 라이브러리로 재설치
+- ~~Orin에 설치할 경우, 다음 사항들을 추가해야 함~~
+    - ~~Orin에서 동작하는 버전의 라이브러리로 재설치~~
         ```bash
         pip uninstall tensorflow
         pip install protobuf==5.28.1 transformers==4.46.0    
         ```
-    - protobuf의 msg를 못읽는다는 에러를 방지하기 위해서, src/gdh_speech_audio/gdh_speech_audio/__init__.py의 첫줄에 다음 삽입
+    - ~~protobuf의 msg를 못읽는다는 에러를 방지하기 위해서, src/gdh_speech_audio/gdh_speech_audio/__init__.py의 첫줄에 다음 삽입~~
         ```
         import os
         os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
@@ -130,11 +128,6 @@ GDH (GuideDog HRI) module packages
     ./0build.sh
     ```
 
-## 2.2. gdh_image, gdh_vlm_client
-- Build
-    ```bash
-    ./0build_vlm.sh
-    ```
   
 # 3. 동작
 ## 3.1. gdh_package (정적객체검출기) 파트
