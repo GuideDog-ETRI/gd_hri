@@ -6,56 +6,14 @@ GDH (GuideDog HRI) module packages
 
 # 2. 설치
 ## 2.1. gdh_packages, gdh_speech_audio, gdh_image, gdh_vlm_client
-- Move to the workspace folder (assume its as ~/Desktop/gdh)
-    ```bash
-    cd ~/Desktop/gdh
-    ```
-
-- Download GDH packages from [github](https://github.com/GuideDog-ETRI/gd_hri). Assume it located in ~/Desktop/gdh
+- Download GDH packages from [github](https://github.com/GuideDog-ETRI/gd_hri).
     ```bash
     git clone https://github.com/GuideDog-ETRI/gd_hri .
-    ```
-
-- To use TTS of OpenAI
-    ```bash
-    pip install pygame
     ```
 
 - If you have a tensorflow, we may meet un error related to tensorflow version, run below, first.
     ```
     pip uninstall tensorflow
-    ```
-
-- Check python command is runable. If not, then.
-    ```
-    alias python=python3
-    ```
-
-- (No More Use) To use STT of [ReturnZero](https://www.rtzr.ai/stt)
-    ```bash
-    cd src/gdh_speech_audio/gdh_speech_audio
-    ```
-    ```bash
-    # To Download definition (.proto) file
-    wget https://raw.github.com/vito-ai/openapi-grpc/main/protos/vito-stt-client.proto
-
-    # To generate gRPC code
-    pip install grpcio-tools
-    python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. ./vito-stt-client.proto
-
-    # This module requires the dependencies of grpcio and requests.
-    pip install grpcio
-    pip install requests
-    ```
-
-    Check 3 files with starting vito~ are generated in src/gdh_speech_audio/gdh_speech_audio.
-
-    ```bash
-    cd ../../..
-    ```
-    Open src/gdh_speech_audio/gdh_speech_audio/vito_stt_client_pb2_grpc.py. Then change the line 6 to the following line.
-    ```python
-    import gdh_speech_audio.vito_stt_client_pb2 as vito__stt__client__pb2
     ```
 
 - pyaudio 설치
@@ -78,7 +36,6 @@ GDH (GuideDog HRI) module packages
     pip install git+https://github.com/openai/whisper.git 
     ```
 
-
 - Download gd_ifc_pkg (interfaces for all gd modules) from [github](https://github.com/GuideDog-ETRI/gd_ifc_pkg).
     ```bash
     cd src
@@ -96,10 +53,10 @@ GDH (GuideDog HRI) module packages
     cd ..
     ```
 
-- To use yolo-v8 and rectify erp images (1.0.1 버전은 출력이미지를 정사각형으로 만드는 버그 있음. must use py360convert>=1.0.2)
+- To use yolo-v8.
     ```bash    
     pip install ultralytics
-    pip install numpy==1.25.0
+    pip install numpy
     ```
 
 - (No more use) To use depth estimation
@@ -109,64 +66,59 @@ GDH (GuideDog HRI) module packages
 
 - Download Yolo models (gddemo_v2.1 version) from [Google drive](https://drive.google.com/drive/folders/1DFF6rFE7NYYMgBKvXmN59T1wD3KD05Tb?usp=sharing) or [GD Server](\\129.254.81.123\GuideDog_NAS\50_DB\gdh_src\models) and place in the folder /models.
 
-- ~~Create /src/gdh_speech_audio/gdh_speech_audio/key_wallet.py file.~~
-
-- ~~Orin에 설치할 경우, 다음 사항들을 추가해야 함~~
-    - ~~Orin에서 동작하는 버전의 라이브러리로 재설치~~
-        ```bash
-        pip uninstall tensorflow
-        pip install protobuf==5.28.1 transformers==4.46.0    
-        ```
-    - ~~protobuf의 msg를 못읽는다는 에러를 방지하기 위해서, src/gdh_speech_audio/gdh_speech_audio/__init__.py의 첫줄에 다음 삽입~~
-        ```
-        import os
-        os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
-        ```
-
 - Build
     ```bash
     ./0build.sh
     ```
 
   
+## 2.2. Option 설정
+- models/gdh_config.yaml 파일에 다양한 옵션 설정이 가능함
+
+
 # 3. 동작
 ## 3.1. gdh_package (정적객체검출기) 파트
 - Open three new terminals by Ctrl + Alt + T for (A) dummy photo publisher, (B) GDH node, and (C) toy test client
 
-- (A) 이미지를 publish하기위해 (A-1), (A-2) 중에 하나를 실행한다.
-- (A-1) 리코세타를 설치하지않고 녹화된 영상을 재생하겠다면, [다음 링크](https://drive.google.com/file/d/18xELEj7PeVmdU_xKqT7OH1pQPjSQ95zT/view?usp=drive_link)에서 파일을 받고 rosbag/rosbag2_2024_07_11-16_34_43 폴더로 복사 후, 다음을 실행한다. ros2 topic list 입력시 /image_raw가 있다면 성공.
+- (A) 이미지를 publish하기위해 리코세타를 설치하지않고 녹화된 영상을 재생하겠다면, [다음 링크](https://drive.google.com/file/d/18xELEj7PeVmdU_xKqT7OH1pQPjSQ95zT/view?usp=drive_link)에서 파일을 받고 rosbag/rosbag2_2024_07_11-16_34_43 폴더로 복사 후, 다음을 실행한다. ros2 topic list 입력시 /image_raw가 있다면 성공.
     ```
-    cd rosbag
-    ./play.bash
-    ```
-- (A-2) dataset 폴더의 이미지를 publish할 경우
-    ```
-    ./1run_vlm.sh
+    cd gd_hri/rosbag
+	./play.bash
+
+	ros2 topic list    # /theta/image_raw/compressed 확인
+	ros2 topic info /theta/image_raw/compressed    # Type과 Publisher 확인
+	ros2 topic echo /theta/image_raw/compressed    # 숫자 변하는지 확인
     ```
 
 - (B) Run a GDH node (receiving images and processing HRI functions). 정상적이라면 이미지를 받은 알림과 GDHHeartBeat msg의 출력을 볼 수 있음.
     ```bash
     ./1run.sh
+    ./1run_detector.sh  # 만약, 검출기만 실행하고자하는 경우
+    # models/gdh_config.yaml 파일 내에서 image topic 이름, decompress여부, rectify 여부 선택가능
     ```
 
 - (C) Request services
     ```bash
     . install/setup.bash
 
-    # check image input
-    ros2 topic list
-    ros2 topic echo /theta/image_raw/compressed
-
     # start detector
     ros2 service call /GDH_start_detect gd_ifc_pkg/srv/GDHStartDetectObject "{object_types: 10}"
-
-    # display result
-    ros2 run gdh_package client_display_detect  # /GDH_detections_img
 
     # stop detector
     ros2 service call /GDH_stop_detect gd_ifc_pkg/srv/GDHStopDetectObject
     ```
     * Results are saved in the GDH folder.
+
+- (D) 동작확인
+    ```bash
+    rqt
+    ```
+
+- (E) 결과 녹화
+    ```bash
+    ./2run_image_saver.sh
+	# models/gdh_config.yaml 파일 내에서 save 파일명 수정가능
+    ```
 
 ## 3.2. gdh_speech_audio (STT/TTS) 파트
 - Open three new terminals for GDH node, toy client for sending speech codes, toy server for receiving command id.
@@ -203,50 +155,11 @@ GDH (GuideDog HRI) module packages
     ```
 
 ## 3.4. gdh_vlm_client (SA-VLM) 파트
-- 먼저 SA-VLM on Orin을 설치하고, 별도 docker에서 실행 확인
-- gdh_docker에서 4개의 terminal을 열고 아래 명령어를 각각 실행
-
-    ```bash
-    ./1run_vlm.sh            # 폴더에서 이미지를 주기적으로 publish하고 받고 변환하는 nodes. 화살표로 이미지 전환
-    ```
-
-    ```bash
-    ./1run_vlm_recv.sh       # VLM결과 받고 TTS 서비스를 호출하는 node
-    ```
-
-    ```bash
-    ./1run_vlm_toggle.sh     # 엔터를 누르면 flag on 시키고 True를 publish 노드. 아니면 False를 publish
-    ```
-
-    ```bash
-    rqt_graph    # 노드간 연결 그래프와 topic을 display
-    ```
-
-- 위 명령어들은 아래 명령어들을 적절히 분배해서 실행함
-
-    ```
-    . install/setup.bash
-    ros2 run convert_image image_publisher_node    # 폴더에서 이미지를 주기적으로 publish. 화살표로 이미지 전환
-    ros2 run convert_image image_viewer_node       # 이미지 확인
-    ros2 run convert_image convert_image_node      # 현재 이미지 확인.단, flag on 인경우,  Image -> Base64로 변환 후 publish
-    ros2 run flag_publisher toggle_flag_node       # 엔터를 누르면 flag on 시키고 True를 publish 노드. 아니면 False를 publish
-    ros2 run qwen_text_viewer qwen_console_node    # VLM결과 받는 노드
-    ros2 run ai_image_subscriber image_ai_node     # VLM client 실행하는 노드
-    ```
+- 별도의 docker로 동작하는 TTS와 SA-VLM 고속화 버전을 실행한다.
+- 이후 음성 명령으로 지금상황어때, 왜 멈췄어를 물어보면 된다.
     
 
 # 4. 오류 처리
-- 만약 no module py360convert가 나온다면,
-    아래 명령어로 현재 수행하는 python path를 확인
-    ```
-    import sys
-    print(sys.executable)
-    ```
-    알맞은 환경에 py360convert를 설치 (/usr/bin/python3가 위에서 출력한 환경이라면)
-    ```
-    /usr/bin/python3 -m pip install py360convert
-    ```
-
 - if gd_ifc_pkg makes new errors, install belows
     ```
     sudo apt-get update
@@ -314,7 +227,7 @@ GDH (GuideDog HRI) module packages
     aplay -l
     ``` -->
 
-# 5. SA-VLM on Orin 설치
+# 5. SA-VLM on Orin 설치 (안되는 경우)
     ```bash
     cd gdh_savlm/docker
     # sudo docker container ls -a

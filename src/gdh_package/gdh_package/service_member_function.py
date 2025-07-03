@@ -111,7 +111,10 @@ class GDHService(Node):
         self.bridge = CvBridge()
         
         self.odom_topic = conf['odom_name']
-        
+        self.img_topic = conf['image_name']
+        self.do_decompress = conf['do_decompress']
+        self.do_rectify = conf['do_rectify']
+       
         # init for subscription
         self.latest_ricoh_erp_image = None
         self.yolo_odom = None
@@ -228,7 +231,7 @@ class GDHService(Node):
         # Compressed ERP Image        
         qos_profile.reliability = QoSReliabilityPolicy.BEST_EFFORT     
         subscription = self.create_subscription(
-            CompressedImage, '/theta/image_raw/compressed',
+            CompressedImage, self.img_topic,
             self.listener_callback_ricoh_comprssed,
             qos_profile=qos_profile,
             callback_group=self.cb_subs2)
@@ -295,7 +298,13 @@ class GDHService(Node):
 
         # compressed image to numpy
         np_arr = np.frombuffer(msg.data, np.uint8)
-        img_decoded = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)    # nparray is returned
+
+        if self.do_decompress:
+            img_decoded = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)    # nparray is returned
+        else:
+            img_decoded = copy.deepcopy(np_arr)
+
+        print(img_decoded.shape)
 
         self.last_image_received_time = time.time()
 
@@ -427,11 +436,15 @@ class GDHService(Node):
             
             for htheta, vtheta in zip(htheta_list, vtheta_list):
                 self.get_logger().debug(f'erp_to_rect args: erp_copy: {erp_copy.shape}, fov_deg_hv: ({hfov}, {vfov}), htheta: {htheta}')
-                planar_image = erp_to_rect(erp_image=erp_copy, 
-                                           theta=np.deg2rad(htheta),
-                                           hfov=np.deg2rad(hfov),
-                                           vfov=np.deg2rad(vfov)
-                                          )
+
+                if self.do_rectify:
+                    planar_image = erp_to_rect(erp_image=erp_copy, 
+                                            theta=np.deg2rad(htheta),
+                                            hfov=np.deg2rad(hfov),
+                                            vfov=np.deg2rad(vfov)
+                                            )
+                else:
+                    planar_image = copy.deepcopy(erp_copy)
                 self.get_logger().debug(f'erp_to_rect outs: planar_image: {planar_image.shape}')
                 
                 # self.get_logger().info(f'DEBUGGING!!!')

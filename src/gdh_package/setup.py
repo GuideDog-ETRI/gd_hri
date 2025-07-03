@@ -28,7 +28,8 @@ setup(
             'client_stop_detect = gdh_package.client_member_function_stop_detect:main',
             'client_display_detect = gdh_package.client_member_function_display_detect:main',
             'client_code_send = gdh_package.client_code_send:main',
-            'server_toy_gd_others = gdh_package.server_toyGDOthers:main'
+            'server_toy_gd_others = gdh_package.server_toyGDOthers:main',
+            'image_saver_node = gdh_package.image_saver_node:main'
         ],
     },
 )

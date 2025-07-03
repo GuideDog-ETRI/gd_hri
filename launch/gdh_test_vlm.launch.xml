@@ -1,3 +1,0 @@
-<launch>
-  <node pkg="gdh_vlm_client" exec="image_ai_node" name="image_ai_node" output="screen"/>
-</launch>
