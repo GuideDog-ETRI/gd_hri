@@ -85,9 +85,10 @@ class GDHService(Node):
 
         # ① 콜백 그룹 객체 생성
         self.cb_srv   = ReentrantCallbackGroup()          # 모든 서비스
-        self.cb_timer = MutuallyExclusiveCallbackGroup()  # 하트비트 타이머
-        self.cb_subs2  = MutuallyExclusiveCallbackGroup()  # 이미지
+        self.cb_timer = MutuallyExclusiveCallbackGroup()  # 하트비트 타이머        
         self.cb_subs1  = MutuallyExclusiveCallbackGroup()  # 오도메트리
+        self.cb_subs2  = MutuallyExclusiveCallbackGroup()  # 이미지-main
+        self.cb_subs3  = MutuallyExclusiveCallbackGroup()  # 이미지-sub
 
         # load from conf.yaml
         path_to_config = 'models/gdh_config.yaml'
@@ -106,7 +107,16 @@ class GDHService(Node):
         # Locks
         self.detect_flag_lock = Lock()
         self.odom_lock = Lock()
-        
+        self.sub_image_lock = Lock()  # 서브 이미지/타임스탬프 보호용
+
+        # traffic light detection options
+        self.tld_use_2nd_image = conf['traffic_light_detection']['use_2nd_image']
+        self.tld_image_name_2nd = conf['traffic_light_detection']['image_name_2nd']
+        self.tld_do_decompress = conf['traffic_light_detection']['do_decompress']
+        self.tld_do_rectify = conf['traffic_light_detection']['do_rectify']
+        self.tld_filtering_the_max_conf = conf['traffic_light_detection']['filtering_the_max_conf']
+        self.tld_image_freshness_threshold_sec = conf['traffic_light_detection']['image_freshness_threshold_sec']
+
         
         self.bridge = CvBridge()
         
@@ -116,22 +126,26 @@ class GDHService(Node):
         self.do_rectify = conf['do_rectify']
        
         # init for subscription
-        self.latest_ricoh_erp_image = None
+        # self.latest_main_image = None # No more use, all processed in the main callback without saving
+        self.latest_sub_image = None
         self.yolo_odom = None
         self.odom = None
         self.odom_cnt = 0
         
-        self.subscription = self.handle_subs_ricoh_comp()
-        self.odometry_sub = self.handle_subs_odometry()
+        self.sub_image_main = self.handle_subs_image_main()
+        self.sub_image_sub = self.handle_subs_image_sub()
+        self.sub_odometry = self.handle_subs_odometry()
         
-        self.subscription  # prevent unused variable warning
-        self.odometry_sub
+        self.sub_image_main  # prevent unused variable warning
+        self.sub_image_sub   # prevent unused variable warning
+        self.sub_odometry    # prevent unused variable warning
 
         self.last_image_received_time = None  # 최근 이미지 수신 시각
+        self.last_sub_image_received_time = None  # 최근 서브 이미지 수신 시각
         self.last_odom_received_time = None  # 최근 odom 수신 시각
         
         # service type(in/out params), name, callback func.
-        self.topic_name_get_gp = '/get_image_gp'
+        self.topic_name_get_gp = conf['get_gp_name']
         self.get_point_client = self.create_client(GDGGetImageGuidancePoint, self.topic_name_get_gp)
 
         self.srv_init_detector = self.create_service(GDHInitializeDetectStaticObject, '/GDH_init_detect', self.init_detector)
@@ -161,7 +175,7 @@ class GDHService(Node):
         self.vfov = 70
         
         self.all_object_type_id = 255
-        self.detect_object_types = self.all_object_type_id
+        self.detect_object_type = self.all_object_type_id
 
         self.yolo_model = None
         self.yolo_conf_threshold = conf['yolo_model']['conf_threshold']
@@ -226,7 +240,7 @@ class GDHService(Node):
         
         return subscription
 
-    def handle_subs_ricoh_comp(self):
+    def handle_subs_image_main(self):
         qos_profile = QoSProfile(depth=2)
         qos_profile.reliability = QoSReliabilityPolicy.BEST_EFFORT     
 
@@ -234,16 +248,40 @@ class GDHService(Node):
             # Compressed Image        
             subscription = self.create_subscription(
                 CompressedImage, self.img_topic,
-                self.listener_callback_ricoh_comprssed,
+                self.listener_callback_ricoh_main,
                 qos_profile=qos_profile,
                 callback_group=self.cb_subs2)
         else:
             # Normal Image
             subscription = self.create_subscription(
                 Image, self.img_topic,
-                self.listener_callback_ricoh_comprssed,
+                self.listener_callback_ricoh_main,
                 qos_profile=qos_profile,
                 callback_group=self.cb_subs2)
+        
+        return subscription
+    
+    def handle_subs_image_sub(self):
+        if self.tld_use_2nd_image:
+            qos_profile = QoSProfile(depth=2)
+            qos_profile.reliability = QoSReliabilityPolicy.BEST_EFFORT     
+
+            if self.tld_do_decompress:
+                # Compressed Image        
+                subscription = self.create_subscription(
+                    CompressedImage, self.tld_image_name_2nd,
+                    self.listener_callback_ricoh_sub,
+                    qos_profile=qos_profile,
+                    callback_group=self.cb_subs3)
+            else:
+                # Normal Image
+                subscription = self.create_subscription(
+                    Image, self.tld_image_name_2nd,
+                    self.listener_callback_ricoh_sub,
+                    qos_profile=qos_profile,
+                    callback_group=self.cb_subs3)
+        else:
+            subscription = None
         
         return subscription
     
@@ -260,22 +298,33 @@ class GDHService(Node):
         now = time.time()
         img_timeout_sec = 5.0
 
-        # 콜백 확인
+        # odom 재구독 체크
         if self.last_odom_received_time is None or (now - self.last_odom_received_time) > img_timeout_sec:
             self.get_logger().warn(f"[HEARTBEAT] Odometry not received in {img_timeout_sec} sec.")
-            if self.odometry_sub is not None:
-                self.destroy_subscription(self.odometry_sub)
+            if self.sub_odometry is not None:
+                self.destroy_subscription(self.sub_odometry)
                 self.get_logger().info(f"[HEARTBEAT] Destroyed previous odometry subscription.")
-            self.odometry_sub = self.handle_subs_odometry()
+            self.sub_odometry = self.handle_subs_odometry()
             self.get_logger().info(f"[HEARTBEAT] Re-subscribed to odometry topic.")
+        
+        # 서브 이미지 재구독 (traffic light용)
+        if self.tld_use_2nd_image:
+            if self.last_sub_image_received_time is None or (now - self.last_sub_image_received_time) > img_timeout_sec:
+                self.get_logger().warn(f"[HEARTBEAT] Sub image not received in {img_timeout_sec} sec. Resubscribing.")
+                if self.sub_image_sub is not None:
+                    self.destroy_subscription(self.sub_image_sub)
+                    self.get_logger().info(f"[HEARTBEAT] Destroyed previous sub-image subscription.")
+                self.sub_image_sub = self.handle_subs_image_sub()
+                self.get_logger().warn(f"[HEARTBEAT] Re-subscribed to sub image topic due to timeout.")
 
+        # 메인 이미지 재구독
         if self.last_image_received_time is None or (now - self.last_image_received_time) > img_timeout_sec:
-            self.get_logger().warn(f"[HEARTBEAT] Image not received in {img_timeout_sec} sec. Resubscribing.")
-            if self.subscription is not None:
-                self.destroy_subscription(self.subscription)
-                self.get_logger().info(f"[HEARTBEAT] Destroyed previous image subscription.")
-            self.subscription = self.handle_subs_ricoh_comp()
-            self.get_logger().warn(f"[HEARTBEAT] Re-subscribed to image topic due to timeout.")
+            self.get_logger().warn(f"[HEARTBEAT] Main image not received in {img_timeout_sec} sec. Resubscribing.")
+            if self.sub_image_main is not None:
+                self.destroy_subscription(self.sub_image_main)
+                self.get_logger().info(f"[HEARTBEAT] Destroyed previous main image subscription.")
+            self.sub_image_main = self.handle_subs_image_main()
+            self.get_logger().warn(f"[HEARTBEAT] Re-subscribed to main image topic due to timeout.")
             status_msg.errcode = status_msg.ERR_NO_IMAGE
         else:
             if self.detecting:
@@ -299,8 +348,22 @@ class GDHService(Node):
             self.get_logger().info(f'Odometry is subscribed!')
             self.odom_cnt = 0
     
-    # image
-    def listener_callback_ricoh_comprssed(self, msg):
+    # image_sub
+    def listener_callback_ricoh_sub(self, msg):
+        # 최신 서브 이미지를 버퍼에 저장 (탐지는 하지 않음)
+        if self.tld_do_decompress:
+            np_arr = np.frombuffer(msg.data, np.uint8)
+            img_decoded = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        else:
+            img_decoded = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+
+        now = time.time()
+        with self.sub_image_lock:
+            self.latest_sub_image = img_decoded
+            self.last_sub_image_received_time = now
+
+    # image_main
+    def listener_callback_ricoh_main(self, msg):
         with self.odom_lock:
             if self.odom is not None:
                 self.yolo_odom = copy.deepcopy(self.odom)
@@ -312,26 +375,54 @@ class GDHService(Node):
         else:
             img_decoded = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
 
-        print(img_decoded.shape)
+        self.get_logger().debug(f'Raw received image size at main image callback: {img_decoded.shape}')
 
         self.last_image_received_time = time.time()
 
         with self.detect_flag_lock:
-            if not self.detecting:
-                self.get_logger().debug("Detection is disabled, skipping image.")
-                return
-            
+            detecting_now = self.detecting
+            detect_object_type_now = self.detect_object_type
+
+        if not detecting_now:
+            self.get_logger().debug("Detection is disabled, skipping the detection process.")
+            return
+
+        # Use 2nd image if configured for traffic light detection
+        selected_img = img_decoded
+        do_rectify = self.do_rectify
+
+        if self.tld_use_2nd_image:
+            with self.sub_image_lock:
+                sub_img = self.latest_sub_image.copy() if self.latest_sub_image is not None else None
+                sub_ts  = self.last_sub_image_received_time
+        
+            if (detect_object_type_now == ObjectType.PEDESTRIAN_TRAFFIC_LIGHT) and detecting_now and (sub_img is not None):
+                self.get_logger().debug("Try to use 2nd image for traffic light detection.")
+                # 서브 이미지 신선도 체크 (예: 1.0초)
+                if (sub_ts is not None and
+                    (time.time() - sub_ts) < self.tld_image_freshness_threshold_sec):
+                    selected_img = sub_img
+                    do_rectify = self.tld_do_rectify
+                    self.get_logger().info("[TLD] Using sub-image for traffic light detection.")
+                else:
+                    self.get_logger().warn(f"[TLD] Sub-image is too old (over {self.tld_image_freshness_threshold_sec}s); Using main image.")
+
         loop_start = time.time()
 
         # 1) ERP → Rectified
         t0 = time.time()
 
-        res, list_imgs = self.get_rectified_ricoh_images(
-            img_decoded,
-            htheta_list=self.htheta_list, 
-            vtheta_list=self.vtheta_list,
-            hfov=self.hfov, 
-            vfov=self.vfov)
+        if do_rectify:
+            res, list_imgs = self.get_rectified_ricoh_images(
+                selected_img,
+                htheta_list=self.htheta_list, 
+                vtheta_list=self.vtheta_list,
+                hfov=self.hfov, 
+                vfov=self.vfov)
+        else:
+            res = True
+            list_imgs = [selected_img]
+
         t1 = time.time()
         
         if not res:
@@ -377,16 +468,16 @@ class GDHService(Node):
         with self.detect_flag_lock:
             detecting2 = self.detecting
 
-        if detecting2: # check one more time before publishing message(self.detect_object_types = request.object_types)
+        if detecting2: # check one more time before publishing message(self.detect_object_type = request.object_types)
             t3 = time.time()
             
             # 3) filtering the detection results
-            if self.detect_object_types == self.all_object_type_id:
+            if self.detect_object_type == self.all_object_type_id:
                 detections_filtered = dets_msg.detections
             else:
                 detections_filtered = [
                     item for item in dets_msg.detections 
-                    if int(item.obj_type) in [self.detect_object_types] and int(item.obj_type) != 254
+                    if (int(item.obj_type) == self.detect_object_type) and (int(item.obj_type) != 254)
                 ]
             dets_msg.detections = detections_filtered
 
@@ -445,14 +536,12 @@ class GDHService(Node):
             for htheta, vtheta in zip(htheta_list, vtheta_list):
                 self.get_logger().debug(f'erp_to_rect args: erp_copy: {erp_copy.shape}, fov_deg_hv: ({hfov}, {vfov}), htheta: {htheta}')
 
-                if self.do_rectify:
-                    planar_image = erp_to_rect(erp_image=erp_copy, 
-                                            theta=np.deg2rad(htheta),
-                                            hfov=np.deg2rad(hfov),
-                                            vfov=np.deg2rad(vfov)
-                                            )
-                else:
-                    planar_image = copy.deepcopy(erp_copy)
+                planar_image = erp_to_rect(erp_image=erp_copy, 
+                                        theta=np.deg2rad(htheta),
+                                        hfov=np.deg2rad(hfov),
+                                        vfov=np.deg2rad(vfov)
+                                        )
+
                 self.get_logger().debug(f'erp_to_rect outs: planar_image: {planar_image.shape}')
                 
                 # self.get_logger().info(f'DEBUGGING!!!')
@@ -762,6 +851,8 @@ class GDHService(Node):
         t_start = time.perf_counter()
     
         dets_np_img = []
+        traffic_light_candidates = []  # [(conf, det_res)]
+        other_candidates = []          # [det_res]
 
         # for testing with GDG
         if self.testing_w_GDG:
@@ -862,17 +953,23 @@ class GDHService(Node):
                         elevator_id = None
 
                     if conf >= self.yolo_conf_threshold:
-                        box2d = BoundingBox2D(center=Pose2D(position=Point2D(x=box_xywh[0], y=box_xywh[1]), 
-                                                            theta=float(0.0)), 
-                                                size_x=box_xywh[2], size_y=box_xywh[3])
-                        det_res = GDHDetection2DExt(header=dets_msg.header, bbox=box2d, 
-                                                    obj_type=obj_type, obj_status=obj_status,
-                                                    cam_id=cam_id, img_w=img_w, img_h=img_h, 
-                                                    htheta=htheta_rad, vtheta=vtheta_rad, 
-                                                    hfov=hfov_rad, vfov=vfov_rad
-                                                    )
-                        # std_msgs/Header header
-                        dets_msg.detections.append(det_res)
+                        box2d = BoundingBox2D(
+                            center=Pose2D(position=Point2D(x=box_xywh[0], y=box_xywh[1]), theta=float(0.0)), 
+                            size_x=box_xywh[2], size_y=box_xywh[3]
+                        )
+                        det_res = GDHDetection2DExt(
+                            header=dets_msg.header, bbox=box2d, 
+                            obj_type=obj_type, obj_status=obj_status,
+                            cam_id=cam_id, img_w=img_w, img_h=img_h, 
+                            htheta=htheta_rad, vtheta=vtheta_rad, 
+                            hfov=hfov_rad, vfov=vfov_rad
+                        )
+                        # # std_msgs/Header header
+                        # dets_msg.detections.append(det_res)
+                        if self.tld_filtering_the_max_conf and (obj_type == ObjectType.PEDESTRIAN_TRAFFIC_LIGHT):
+                            traffic_light_candidates.append((conf, det_res))
+                        else:
+                            other_candidates.append(det_res)
 
             # save as numpy
             np_result = result.plot()
@@ -931,7 +1028,21 @@ class GDHService(Node):
 
             dets_np_img.append(np_result)
 
+        # traffic light 후보 필터링
+        if self.tld_filtering_the_max_conf:
+            if len(traffic_light_candidates) > 0:
+                # conf가 가장 큰 신호등 1개만 선택
+                best_conf, best_det = max(traffic_light_candidates, key=lambda x: x[0])
+                dets_msg.detections = other_candidates + [best_det]
+                self.get_logger().info("[TLD] Kept only the highest-confidence pedestrian traffic light.")
+            else:
+                dets_msg.detections = other_candidates
+        else:
+            # 필터링 비활성화 시: 모든 신호등 후보를 그대로 포함
+            dets_msg.detections = other_candidates + [det for _, det in traffic_light_candidates]
+
         parsing_end = time.perf_counter()
+
         
         # 5) 이미지 합치기
         comb_start = time.perf_counter()
@@ -1015,16 +1126,16 @@ class GDHService(Node):
         with self.detect_flag_lock:
             self.get_logger().info(f'                                       self.detecting: {self.detecting}')
             if not self.detecting:
-                self.detect_object_types = request.object_types
+                self.detect_object_type = request.object_types
                 self.detecting = True
 
                 response.success = True
-                response.message = f'Detection started with {self.detect_object_types}.'
+                response.message = f'Detection started with {self.detect_object_type}.'
             else:
-                self.detect_object_types = request.object_types
+                self.detect_object_type = request.object_types
         
                 response.success = True
-                response.message = f'Detection target is changed to {self.detect_object_types}.'
+                response.message = f'Detection target is changed to {self.detect_object_type}.'
         
         self.get_logger().info(f'                                       response: {response}')
             

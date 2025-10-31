@@ -20,6 +20,16 @@ image_name: "/theta/image_raw/compressed"
 do_decompress: True
 do_rectify: True
 
+traffic_light_detection:
+  use_2nd_image: True
+  image_name_2nd: "/camera/camera/color/image_raw"
+  do_decompress: False
+  do_rectify: False
+  filtering_the_max_conf: True
+  image_freshness_threshold_sec: 1.0
+
+get_gp_name: "/get_image_gp"
+
 odom_name: "/gdq/msg/gdq_odom"
 # odom_name: "/j100_0778/platform/odom/filtered"
 
