@@ -228,13 +228,22 @@ class GDHService(Node):
 
     def handle_subs_ricoh_comp(self):
         qos_profile = QoSProfile(depth=2)
-        # Compressed ERP Image        
         qos_profile.reliability = QoSReliabilityPolicy.BEST_EFFORT     
-        subscription = self.create_subscription(
-            CompressedImage, self.img_topic,
-            self.listener_callback_ricoh_comprssed,
-            qos_profile=qos_profile,
-            callback_group=self.cb_subs2)
+
+        if self.do_decompress:
+            # Compressed Image        
+            subscription = self.create_subscription(
+                CompressedImage, self.img_topic,
+                self.listener_callback_ricoh_comprssed,
+                qos_profile=qos_profile,
+                callback_group=self.cb_subs2)
+        else:
+            # Normal Image
+            subscription = self.create_subscription(
+                Image, self.img_topic,
+                self.listener_callback_ricoh_comprssed,
+                qos_profile=qos_profile,
+                callback_group=self.cb_subs2)
         
         return subscription
     
@@ -296,13 +305,12 @@ class GDHService(Node):
             if self.odom is not None:
                 self.yolo_odom = copy.deepcopy(self.odom)
 
-        # compressed image to numpy
-        np_arr = np.frombuffer(msg.data, np.uint8)
-
         if self.do_decompress:
+            # compressed image to numpy
+            np_arr = np.frombuffer(msg.data, np.uint8)
             img_decoded = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)    # nparray is returned
         else:
-            img_decoded = copy.deepcopy(np_arr)
+            img_decoded = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
 
         print(img_decoded.shape)
 

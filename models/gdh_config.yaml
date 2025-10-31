@@ -11,8 +11,12 @@ camera:
    - 180
   hfov_vlm: 90
 
+# ricoh theta
 image_name: "/theta/image_raw/compressed"
+# zed
 # image_name: "/zed/zed_node/left/image_rect_color/compressed"
+# d455
+# image_name: "/camera/camera/color/image_raw"
 do_decompress: True
 do_rectify: True
 
