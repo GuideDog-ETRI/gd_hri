@@ -116,8 +116,8 @@ class GDHService(Node):
         self.tld_do_rectify = conf['traffic_light_detection']['do_rectify']
         self.tld_filtering_the_max_conf = conf['traffic_light_detection']['filtering_the_max_conf']
         self.tld_image_freshness_threshold_sec = conf['traffic_light_detection']['image_freshness_threshold_sec']
+        self.sgate_filtering_the_max_conf = conf['subway_gate_detection']['filtering_the_max_conf']
 
-        
         self.bridge = CvBridge()
         
         self.odom_topic = conf['odom_name']
@@ -496,6 +496,10 @@ class GDHService(Node):
             self.get_logger().info(f'                      {dets_msg}')
             self.publisher_detect.publish(dets_msg)
             t7 = time.time()
+
+            
+            # <-- 여기서 최종 dets_msg.detections를 사용해 하단 텍스트 생성
+            combined_np_img = self.annotate_bottom_text(combined_np_img, dets_msg.detections)
                                     
             t5 = time.time()
             # 결과를 Image 메시지로 변환하여 퍼블리시       
@@ -851,7 +855,11 @@ class GDHService(Node):
         t_start = time.perf_counter()
     
         dets_np_img = []
-        traffic_light_candidates = []  # [(conf, det_res)]
+        # 클래스별 후보 버킷 (conf, det_res, cam_idx, box_xywh) 쌍 저장
+        candidates_by_type = {
+            ObjectType.PEDESTRIAN_TRAFFIC_LIGHT: [],
+            ObjectType.SUBWAY_GATE: [],
+        }
         other_candidates = []          # [det_res]
 
         # for testing with GDG
@@ -966,9 +974,17 @@ class GDHService(Node):
                         )
                         # # std_msgs/Header header
                         # dets_msg.detections.append(det_res)
-                        if self.tld_filtering_the_max_conf and (obj_type == ObjectType.PEDESTRIAN_TRAFFIC_LIGHT):
-                            traffic_light_candidates.append((conf, det_res))
+                        # 클래스별 필터링 on/off 매핑
+                        filtering_flags = {
+                            ObjectType.PEDESTRIAN_TRAFFIC_LIGHT: self.tld_filtering_the_max_conf,
+                            ObjectType.SUBWAY_GATE: self.sgate_filtering_the_max_conf,
+                        }
+
+                        if obj_type in candidates_by_type and filtering_flags.get(obj_type, False):
+                            # 해당 클래스는 "최대 1개만" 유지하도록 후보 버킷에 (conf, det, idx, box) 쌓기
+                            candidates_by_type[obj_type].append((conf, det_res, idx, box_xywh))
                         else:
+                            # 그 외는 즉시 통과(또는 해당 클래스 필터가 꺼져 있으면 전부 통과)
                             other_candidates.append(det_res)
 
             # save as numpy
@@ -1028,20 +1044,48 @@ class GDHService(Node):
 
             dets_np_img.append(np_result)
 
-        # traffic light 후보 필터링
-        if self.tld_filtering_the_max_conf:
-            if len(traffic_light_candidates) > 0:
-                # conf가 가장 큰 신호등 1개만 선택
-                best_conf, best_det = max(traffic_light_candidates, key=lambda x: x[0])
-                dets_msg.detections = other_candidates + [best_det]
-                self.get_logger().info("[TLD] Kept only the highest-confidence pedestrian traffic light.")
+        # 기본적으로 other 먼저 넣고, 각 클래스 후보를 옵션에 맞게 병합
+        dets_msg.detections = list(other_candidates)
+
+        # 시각화를 위해, "최대 conf로 선택된" 박스 정보를 모아둔다.
+        # [(cam_idx, box_xywh, label_text)]
+        selected_marks = []
+
+        for obj_type, cand_list in candidates_by_type.items():
+            if not cand_list:
+                continue
+
+            # 해당 클래스의 필터링 옵션
+            filtering_on = (
+                (obj_type == ObjectType.PEDESTRIAN_TRAFFIC_LIGHT and self.tld_filtering_the_max_conf) or
+                (obj_type == ObjectType.SUBWAY_GATE and self.sgate_filtering_the_max_conf)
+            )
+
+            if filtering_on:
+                # conf 최대 1개만
+                best_conf, best_det, best_idx, best_box = max(cand_list, key=lambda x: x[0])
+                dets_msg.detections.append(best_det)
+
+                if obj_type == ObjectType.PEDESTRIAN_TRAFFIC_LIGHT:
+                    self.get_logger().info("[TLD] Kept only the highest-confidence pedestrian traffic light.")
+                    selected_marks.append((best_idx, best_box, "MAX TL"))
+                elif obj_type == ObjectType.SUBWAY_GATE:
+                    self.get_logger().info("[SGATE] Kept only the highest-confidence subway gate.")
+                    selected_marks.append((best_idx, best_box, "MAX GATE"))
             else:
-                dets_msg.detections = other_candidates
-        else:
-            # 필터링 비활성화 시: 모든 신호등 후보를 그대로 포함
-            dets_msg.detections = other_candidates + [det for _, det in traffic_light_candidates]
+                # 필터링 off면 전부 포함 (이 부분은 실질적으로 사용되지않으나 안전장치로 남겨둠)
+                for _, det, _, _ in cand_list:
+                    dets_msg.detections.append(det)
+        
 
         parsing_end = time.perf_counter()
+
+
+        # === 선택된 "최대 conf" 항목들 박스 강조(결정 후 그리기) ===
+        for cam_idx, box_xywh, label in selected_marks:
+            if 0 <= cam_idx < len(dets_np_img):
+                self.draw_bbox_label(dets_np_img[cam_idx], box_xywh, label=label, thickness=3)
+
 
         
         # 5) 이미지 합치기
@@ -1113,6 +1157,81 @@ class GDHService(Node):
         img_with_point_np = cv2.circle(img_np, (x, y), radius, color, thickness)
 
         return img_with_point_np
+    
+    def draw_bbox_label(self, img, box_xywh, label="BEST", thickness=3):
+        """
+        box_xywh: (cx, cy, w, h) in pixel
+        Draw rectangle + label text.
+        """
+        cx, cy, w, h = box_xywh
+        x_min = int(cx - w / 2)
+        y_min = int(cy - h / 2)
+        x_max = int(cx + w / 2)
+        y_max = int(cy + h / 2)
+
+        # 사각형(두껍게)
+        cv2.rectangle(img, (x_min, y_min), (x_max, y_max), (0, 0, 255), thickness)
+
+        # 라벨 배경
+        txt = label
+        ((tw, th), baseline) = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+        pad = 4
+        bx1, by1 = x_min, max(0, y_min - th - 2*pad)
+        bx2, by2 = x_min + tw + 2*pad, y_min
+        cv2.rectangle(img, (bx1, by1), (bx2, by2), (0, 0, 255), -1)
+        # 텍스트
+        cv2.putText(img, txt, (x_min + pad, y_min - pad),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
+
+    def annotate_bottom_text(self, img, detections):
+        """
+        최종 dets_msg.detections 내용을 이미지 하단에 '타입(상태)'만 간단히 표기.
+        포맷:
+        "N detections"
+        "[00] PEDESTRIAN_TRAFFIC_LIGHT(RED)"
+        "[01] SUBWAY_GATE(UNKNOWN)"
+        ...
+        """
+        lines = []
+        lines.append(f"{len(detections)} detections")
+
+        max_lines = 15  # 필요시 조정
+        for i, det in enumerate(detections[:max_lines]):
+            try:
+                type_name = ObjectType(det.obj_type).name
+            except Exception:
+                type_name = f"type={int(det.obj_type)}"
+
+            try:
+                status_name = ObjectStatus(det.obj_status).name
+            except Exception:
+                status_name = f"status={int(det.obj_status)}"
+
+            lines.append(f"[{i:02d}] {type_name}({status_name})")
+
+        if not lines:
+            return img
+
+        # 반투명 바탕 박스
+        overlay = img.copy()
+        H, W = img.shape[:2]
+        line_h = 22
+        pad = 10
+        box_h = pad*2 + line_h*len(lines)
+        y0 = max(0, H - box_h)
+        cv2.rectangle(overlay, (0, y0), (W, H), (0, 0, 0), -1)
+
+        alpha = 0.55
+        cv2.addWeighted(overlay, alpha, img, 1 - alpha, 0, img)
+
+        # 텍스트 렌더링
+        y = y0 + pad + 16
+        for li in lines:
+            cv2.putText(img, li, (pad, y), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
+                        (255, 255, 255), 1, cv2.LINE_AA)
+            y += line_h
+
+        return img
 
     def start_detect_object(self, request, response):
         self.get_logger().info(f'Incoming request @ start_detect_object, {request}')

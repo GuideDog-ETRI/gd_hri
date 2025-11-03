@@ -30,6 +30,9 @@ traffic_light_detection:
   image_freshness_threshold_sec: 1.0
   # image_freshness: check the image is captured in given seconds.
 
+subway_gate_detection:
+  filtering_the_max_conf: True
+
 get_gp_name: "/get_image_gp"
 
 odom_name: "/gdq/msg/gdq_odom"
