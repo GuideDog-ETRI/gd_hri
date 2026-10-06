@@ -50,3 +50,6 @@ rosbag_video_udeg0_2024_12_09-16_33_40.mp4
 **/__pycache__/
 outputs/
 dataset/
+rosbag/251021_nouen_crosswalk/
+/rosbag/*
+!/rosbag/play.bash

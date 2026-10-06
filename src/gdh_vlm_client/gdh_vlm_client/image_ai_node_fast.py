@@ -38,15 +38,6 @@ def _check_display() -> bool:
 qos_profile = QoSPresetProfiles.SENSOR_DATA.value     # SENSOR_DATA: Best-Effort + depth=5(또는 10)
 # qos_profile = QoSProfile(reliability=ReliabilityPolicy.RELIABLE, history=HistoryPolicy.KEEP_LAST, depth=1)
 
-# [2026-10-06] guidedog VLM 서버 질문 양식 (src/utils/guidedog-zmq-test.py와 동일, 2026-10-01 RFM lab 메일)
-# {x}/{y}에는 목표 위치(goal)가 들어감. vlm.prompt_mode로 선택
-PROMPTS = {
-    "요약": "[요약] 이미지를 분석하여 목표 위치 ({x}, {y})를 기반으로 시각 장애인을 위한 간단한 도보 안내를 제공해 주세요.",
-    "일반": "[일반] 이미지를 분석하여 목표 위치 ({x}, {y})를 기반으로 시각 장애인을 위한 간단한 도보 안내를 제공해 주세요.",
-    "상세": "[상세] 이미지를 분석하여 목표 위치 ({x}, {y})를 기반으로 장애물의 방향과 위치 정보를 포함한 시각 장애인을 위한 간단한 도보 안내를 제공해 주세요.",
-    "자유": "이 장면에서 보행자가 주의해야 할 점은 무엇인가요?",
-}
-
 def resize_with_long_side(img, long_side=640):
     if img is None:
         raise ValueError(f"이미지를 불러올 수 없습니다: {image_path}")
@@ -98,7 +89,17 @@ class QwenImageSubscriberNode(Node):
         self.vtheta_rad = np.deg2rad(self.vtheta)
         self.hfov_rad = np.deg2rad(self.hfov)
         self.vfov_rad = np.deg2rad(self.vfov)
-        
+
+        # Prompt per SA-VLM command (A: situation, B: detail, C: brief)
+        # [2026-10-06] gd_ifc_pkg의 UserCommand에 없는 명령은 등록하지 않음 (Orin 로컬 msg에는 RUN_SAVLM만 있을 수 있음)
+        prompts = conf['vlm']['prompts']
+        self.cmd_prompts = {}
+        for cmd_name, key in (('RUN_SAVLM', 'situation'), ('RUN_SAVLM_DETAIL', 'detail'), ('RUN_SAVLM_BRIEF', 'brief')):
+            if hasattr(UserCommand, cmd_name):
+                self.cmd_prompts[getattr(UserCommand, cmd_name)] = prompts[key]
+            else:
+                self.get_logger().warning(f"UserCommand.{cmd_name} 없음 (gd_ifc_pkg 업데이트 필요) - '{key}' 질문 비활성화")
+
         if len(self.htheta_list) != 1:
             self.get_logger().warning("\n\n------------------------------------\n\n")
             self.get_logger().warning(f"htheta is not one!. Use the first htheta for SA-VLM: {self.htheta}")
@@ -129,7 +130,6 @@ class QwenImageSubscriberNode(Node):
         # [2026-10-06] VLM 서버 전송 설정 (없으면 기본값)
         vlm_conf = conf.get('vlm') or {}
         self.zmq_pub_addr = vlm_conf.get('zmq_pub_addr', "tcp://*:5555")
-        self.vlm_prompt_mode = vlm_conf.get('prompt_mode', "일반")
         self.vlm_sub_timeout = float(vlm_conf.get('sub_timeout', 1.0))
 
         # Initialize ZeroMQ XPUB socket
@@ -140,7 +140,7 @@ class QwenImageSubscriberNode(Node):
             self.socket = self.zmq_context.socket(zmq.XPUB)
             self.socket.bind(self.zmq_pub_addr)
             self.n_sub = 0
-            self.get_logger().info(f"[Producer] XPUB socket bound to {self.zmq_pub_addr}, prompt_mode={self.vlm_prompt_mode!r}")
+            self.get_logger().info(f"[Producer] XPUB socket bound to {self.zmq_pub_addr}")
         except zmq.ZMQError as e:
             self.get_logger().error(f'ZMQ initialization error: {e}')
             raise
@@ -211,12 +211,10 @@ class QwenImageSubscriberNode(Node):
         time.sleep(0.2)  # 막 연결된 파이프가 안정될 때까지 잠깐 대기 후 첫 프레임 전송
         return True
 
-    def build_prompt(self, gx, gy):
-        """prompt_mode: 요약 | 일반 | 상세 | 자유 -> 양식 질문, 빈 값 -> None(서버 -p 프롬프트), 그 외 -> 문자열 그대로"""
-        if not self.vlm_prompt_mode:
-            return None
-        template = PROMPTS.get(self.vlm_prompt_mode, self.vlm_prompt_mode)
-        return template.replace("{x}", str(gx)).replace("{y}", str(gy))
+    def build_prompt(self, usr_cmd, gx, gy):
+        """음성명령별 질문 (vlm.prompts). 빈 문자열이면 None -> 질문 없이 전송 (서버 -p 프롬프트 사용)"""
+        template = self.cmd_prompts[usr_cmd]
+        return template.format(goal_x=gx, goal_y=gy) if template else None
 
     def send_frame(self, frame, gx, gy, prompt):
         """[header, BGR image, (question)] 전송. header = struct.pack('iiidff', h, w, c, timestamp, goal_x, goal_y)"""
@@ -273,7 +271,7 @@ class QwenImageSubscriberNode(Node):
             prompt = getattr(msg, 'prompt', None)
 
             # Select frame based on command
-            if msg.usr_cmd == UserCommand.RUN_SAVLM:
+            if msg.usr_cmd in self.cmd_prompts:
                 # Make a time for processing
                 # unknown_sentence = "제가 한번 상황을 확인해보겠습니다."
                 unknown_sentence = "저의 보행상황 설명 AI를 통해 보행로 상황을 확인해보겠습니다."
@@ -364,7 +362,7 @@ class QwenImageSubscriberNode(Node):
             h, w, c = frame.shape
             # SA-VLM 질문은 소수점 2자리 goal로 학습됨, 예) "(0.5, 0.55)". 헤더에도 같은 값을 넣음
             gx, gy = round(goal_x, 2), round(goal_y, 2)
-            prompt = self.build_prompt(gx, gy)
+            prompt = self.build_prompt(msg.usr_cmd, gx, gy)
 
             # VLM 서버가 구독 중이 아니면 PUB 프레임은 그냥 버려지므로 전송하지 않음
             if not self.wait_for_vlm_server(self.vlm_sub_timeout):

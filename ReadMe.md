@@ -33,7 +33,8 @@ GDH (GuideDog HRI) module packages
 - OpenAI Whisper관련 모듈 설치
     ```
     pip install SpeechRecognition
-    pip install git+https://github.com/openai/whisper.git 
+    pip install git+https://github.com/openai/whisper.git
+    pip install numba==0.61
     ```
 
 - Download gd_ifc_pkg (interfaces for all gd modules) from [github](https://github.com/GuideDog-ETRI/gd_ifc_pkg).
