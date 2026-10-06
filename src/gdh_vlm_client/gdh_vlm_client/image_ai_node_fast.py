@@ -78,7 +78,15 @@ class QwenImageSubscriberNode(Node):
         self.vtheta_rad = np.deg2rad(self.vtheta)
         self.hfov_rad = np.deg2rad(self.hfov)
         self.vfov_rad = np.deg2rad(self.vfov)
-        
+
+        # Prompt per SA-VLM command (A: situation, B: detail, C: brief)
+        prompts = conf['vlm']['prompts']
+        self.cmd_prompts = {
+            UserCommand.RUN_SAVLM: prompts['situation'],
+            UserCommand.RUN_SAVLM_DETAIL: prompts['detail'],
+            UserCommand.RUN_SAVLM_BRIEF: prompts['brief'],
+        }
+
         if len(self.htheta_list) != 1:
             self.get_logger().warning("\n\n------------------------------------\n\n")
             self.get_logger().warning(f"htheta is not one!. Use the first htheta for SA-VLM: {self.htheta}")
@@ -184,7 +192,7 @@ class QwenImageSubscriberNode(Node):
             prompt = getattr(msg, 'prompt', None)
 
             # Select frame based on command
-            if msg.usr_cmd == UserCommand.RUN_SAVLM:
+            if msg.usr_cmd in self.cmd_prompts:
                 # Make a time for processing
                 # unknown_sentence = "제가 한번 상황을 확인해보겠습니다."
                 unknown_sentence = "저의 보행상황 설명 AI를 통해 보행로 상황을 확인해보겠습니다."
@@ -275,7 +283,7 @@ class QwenImageSubscriberNode(Node):
             payload = frame.tobytes()
 
             # Publish via ZMQ
-            prompt = f"이미지는 실내환경입니다. 이미지를 분석하여 목표 위치 ({goal_x:.4f}, {goal_y:.4f})를 기반으로 시각 장애인을 위한 간단한 도보 안내를 제공해 주세요."
+            prompt = self.cmd_prompts[msg.usr_cmd].format(goal_x=goal_x, goal_y=goal_y)
             if prompt:
                 self.socket.send_multipart([header, payload, prompt.encode('utf-8')])
             else:

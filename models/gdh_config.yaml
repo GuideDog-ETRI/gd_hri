@@ -93,6 +93,14 @@ vlm:
   # model_path: "Qwen/Qwen2.5-VL-3B-Instruct"
   system_content: "You are a guide dog that delivers information about the surrounding environment to the blind."
   user_content: "Please answer what you see on the floor and translate the whole answer into Korean."
+  # prompts sent to SA-VLM server per voice command. {goal_x}, {goal_y} are replaced with the normalized goal point.
+  prompts:
+    # A: RUN_SAVLM (지금상황어때) - destination, left, right, path obstacles, go/stop with reason
+    situation: "이미지는 실내환경입니다. 이미지를 분석하여 목표 위치 ({goal_x:.4f}, {goal_y:.4f})를 기반으로 시각 장애인을 위한 간단한 도보 안내를 제공해 주세요."
+    # B: RUN_SAVLM_DETAIL (상황자세히알려줘) - same as A, each item with clock direction and distance in meters
+    detail: "이미지를 분석하여 목표 위치 ({goal_x:.4f}, {goal_y:.4f})를 기반으로 시각 장애인을 위한 도보 안내를 제공해 주세요. 목적지, 좌측, 우측, 경로상 장애물을 각각 시계 방향과 미터 거리로 설명하고, 마지막에 보행 가능 여부와 그 이유를 말해 주세요."
+    # C: RUN_SAVLM_BRIEF (보행가능해) - walkable or not first, then direction/distance to move or the reason it is blocked
+    brief: "이미지를 분석하여 목표 위치 ({goal_x:.4f}, {goal_y:.4f})를 기반으로 보행 가능 여부를 먼저 말하고, 가능하면 이동할 시계 방향과 미터 거리를, 불가능하면 그 이유와 우회 경로 유무를 한두 문장으로 간단히 말해 주세요."
   
 openai_whisper:
   WHISPER_MODEL_NAME: "large-v3-turbo"
