@@ -4,6 +4,10 @@
 # ROS2 노드: SpeechToCmd  ‑‑ Whisper STT 버전
 # ------------------------------------------------------------
 
+# [2026-10-06] 간헐적 SIGSEGV(exit code -11) 원인 추적용: 크래시 순간 모든 스레드의 파이썬 스택을 stderr(launch 화면)에 출력
+import faulthandler
+faulthandler.enable()
+
 # ──────────────────  ROS  ──────────────────
 import rclpy
 from rclpy.node import Node
@@ -180,12 +184,15 @@ class SpeechToTextClient(Node):
             chunk_size=1024,
         )
 
+        # [2026-10-06] 보정에 쓴 마이크 스트림을 닫지 않고 백그라운드 녹음까지 그대로 사용
+        # 원본: with self.mic 로 보정 후 스트림을 닫고 1초 대기 -> listen_in_background 가 스트림을 다시 엶.
+        # 쉬고 있던 블루투스 헤드셋 마이크가 막 깨어난 직후에 닫았다 다시 열면 간헐적으로 SIGSEGV(exit code -11) 발생
         try:
-            with self.mic as source:
-                if source.stream is None:
-                    raise RuntimeError("Microphone stream failed to open")
+            source = self.mic.__enter__()
+            if source.stream is None:
+                raise RuntimeError("Microphone stream failed to open")
 
-                self.recognizer.adjust_for_ambient_noise(source, duration=0.5)
+            self.recognizer.adjust_for_ambient_noise(source, duration=0.5)
 
         except Exception as e:
             raise RuntimeError(
@@ -194,9 +201,7 @@ class SpeechToTextClient(Node):
                 f"channels={target_channels}): {e}"
             )
 
-        # ALSA / USB audio device release 여유 시간
-        self.get_logger().info("Microphone closed after calibration. Waiting before background listen...")
-        time.sleep(1.0)
+        self.get_logger().info("Microphone calibrated. Keeping the stream open for background listen.")
 
         pa.terminate()
 
@@ -205,12 +210,8 @@ class SpeechToTextClient(Node):
         self.phrase_bytes: bytes = b""
         self.phrase_time: datetime | None = None
 
-        # 백그라운드 녹음 스레드
-        self.recognizer.listen_in_background(
-            self.mic,
-            self._record_callback,
-            phrase_time_limit=self.RECORD_TIMEOUT,
-        )
+        # 백그라운드 녹음 스레드 (listen_in_background 와 같은 동작, 단 이미 열린 스트림 사용)
+        threading.Thread(target=self._listen_loop, daemon=True).start()
 
     def _find_supported_rate(self, pa, device_index: int, preferred_rates: list[int]) -> int:
         checked = []
@@ -236,6 +237,17 @@ class SpeechToTextClient(Node):
         )
 
     # ───────── 내부 콜백 ─────────
+    def _listen_loop(self):
+        while rclpy.ok():
+            try:  # 1초씩 듣고 다시 확인 (listen_in_background 와 동일)
+                audio = self.recognizer.listen(self.mic, 1, self.RECORD_TIMEOUT)
+            except sr.WaitTimeoutError:
+                continue
+            except Exception as e:
+                self.get_logger().error(f"Background listen stopped: {e}")
+                raise
+            self._record_callback(self.recognizer, audio)
+
     def _record_callback(self, _sr, audio: sr.AudioData):
         self.data_queue.put(audio.get_raw_data())
 
