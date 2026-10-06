@@ -12,6 +12,8 @@ faulthandler.enable()
 import rclpy
 from rclpy.node import Node
 from gd_ifc_pkg.msg import UserCommand
+from gd_ifc_pkg.srv import GDHSpeakText
+from std_msgs.msg import String
 
 # ──────────────────  오디오/알림음  ──────────────────
 import pygame
@@ -252,9 +254,12 @@ class SpeechToTextClient(Node):
         self.data_queue.put(audio.get_raw_data())
 
     # ───────── 외부 API ─────────
-    def transcribe_once_base(self) -> str | None:
-        """완성된 문장이 생길 때까지 블록, 생기면 문자열·실패면 None."""
-        
+    def transcribe_once_base(self, timeout_sec: float | None = None) -> str | None:
+        """완성된 문장이 생길 때까지 블록, 생기면 문자열·실패면 None.
+        [2026-10-06] 반환값은 Whisper 원문 (대화 모드에서 VLM 질문으로 그대로 사용, 명령 매칭 키는 호출하는 쪽에서 만듦).
+        timeout_sec 동안 문장이 없으면 None (대화 모드 자동 종료용, None 이면 무제한 대기)."""
+        deadline = None if timeout_sec is None else time.time() + timeout_sec
+
         # buffer initialization
         self.phrase_bytes = b""
         with self.data_queue.mutex:
@@ -283,13 +288,15 @@ class SpeechToTextClient(Node):
                         fp16=torch.cuda.is_available(),
                     )
                     text = result["text"].strip()
-                    text = re.sub(r'[^가-힣]+', '', text)
-                    if text:
+                    # [2026-10-06] 원본: text = re.sub(r'[^가-힣]+', '', text) 를 반환 (공백·숫자·문장부호 제거)
+                    if re.sub(r'[^가-힣]+', '', text):
                         return text
                 except Exception as e:
                     self.get_logger().error(f"Whisper error: {e}")
                     return None
             else:
+                if deadline is not None and time.time() >= deadline:
+                    return None
                 rclpy.spin_once(self, timeout_sec=0.1)
 
         return None  # 노드가 종료될 때
@@ -357,6 +364,23 @@ class SpeechToCmd(Node):
         self.commands = self._load_commands("models/audio_cmd_list.txt", self.trigger_word)
         self.publisher_cmd = self.create_publisher(UserCommand, "/GDH_user_cmd", 1)
 
+        # [2026-10-06] 대화 모드: start_words ~ end_words 사이에서 명령에 매칭되지 않는 문장은
+        # 원문 그대로 /GDH_dialog_text 로 보내 VLM 자유 질문으로 처리 (image_ai_node)
+        dialog_conf = conf['STT'].get('dialog') or {}
+        self.dialog_start_words = self._load_words(dialog_conf.get('start_words', []), self.trigger_word)
+        self.dialog_end_words   = self._load_words(dialog_conf.get('end_words', []), self.trigger_word)
+        self.dialog_use_timeout = bool(dialog_conf.get('use_timeout', False))
+        self.dialog_timeout_sec = float(dialog_conf.get('timeout_sec', 10.0))
+        self.dialog_start_sentence = dialog_conf.get('start_sentence', '')
+        self.dialog_end_sentence   = dialog_conf.get('end_sentence', '')
+        self.dialog_mode = False
+        self.dialog_last_time = 0.0
+        self.get_logger().info(f"dialog start_words: {sorted(self.dialog_start_words)}")
+        self.get_logger().info(f"dialog end_words: {sorted(self.dialog_end_words)}")
+        self.get_logger().info(f"dialog use_timeout: {self.dialog_use_timeout}, timeout_sec: {self.dialog_timeout_sec}")
+        self.publisher_dialog = self.create_publisher(String, "/GDH_dialog_text", 1)
+        self.speak_client = self.create_client(GDHSpeakText, '/GDH_speak_text')
+
         # STT
         self.stt_client = SpeechToTextClient()
 
@@ -381,6 +405,40 @@ class SpeechToCmd(Node):
 
         return cmd
 
+    # --- [2026-10-06] 대화 모드 ---
+    def _load_words(self, words: list, trigger_word: str | None) -> set:
+        """명령 키와 같은 방식: 공백 제거, 트리거 단어를 붙인 것도 인식"""
+        keys = set()
+        for w in words:
+            w = w.replace(" ", "")
+            keys.add(w)
+            if trigger_word:
+                keys.add(f"{trigger_word}{w}")
+        return keys
+
+    def _dialog_time_left(self) -> float | None:
+        """대화 모드 자동 종료까지 남은 시간(초). 대화 모드가 아니거나 자동 종료를 쓰지 않으면 None"""
+        if not (self.dialog_mode and self.dialog_use_timeout):
+            return None
+        return max(0.0, self.dialog_timeout_sec - (time.time() - self.dialog_last_time))
+
+    def _set_dialog_mode(self, on: bool, reason: str):
+        self.dialog_mode = on
+        self.dialog_last_time = time.time()
+        self.get_logger().info(f"Dialog mode {'ON' if on else 'OFF'} ({reason})")
+        self._speak(self.dialog_start_sentence if on else self.dialog_end_sentence)
+
+    def _speak(self, text: str):
+        """안내 음성 (msg_to_audio 의 /GDH_speak_text). 응답은 기다리지 않음"""
+        if not text:
+            return
+        if not self.speak_client.service_is_ready():
+            self.get_logger().warning(f"/GDH_speak_text 서비스 없음 - 안내 생략: {text}")
+            return
+        req = GDHSpeakText.Request()
+        req.text = text
+        self.speak_client.call_async(req)
+
     # --- 메인 루프 ---
     def _listen_and_publish(self):
         msg = UserCommand()
@@ -391,19 +449,35 @@ class SpeechToCmd(Node):
                 # play_audio("models/temp/start_recording.wav")
                 self.get_logger().info("Recording…")
 
-                stt_result = self.stt_client.transcribe_once_base()
+                stt_result = self.stt_client.transcribe_once_base(timeout_sec=self._dialog_time_left())
                 if not stt_result:
-                    self.get_logger().error("STT returned nothing.")
+                    # [2026-10-06] 대화 모드에서 timeout_sec 동안 인식된 문장이 없으면 자동 종료
+                    if self.dialog_mode and self._dialog_time_left() == 0:
+                        self._set_dialog_mode(False, f"{self.dialog_timeout_sec:.0f}초 동안 말이 없음")
+                    else:
+                        self.get_logger().error("STT returned nothing.")
                     continue
-                    
+
                 self.get_logger().info(f"STT result: “{stt_result}”")
-                stt_key = stt_result.replace(" ", "")
+                if self.dialog_mode:
+                    self.dialog_last_time = time.time()
+
+                # 명령 매칭 키: 한글만 남김 (공백·숫자·문장부호 제거)
+                stt_key = re.sub(r'[^가-힣]+', '', stt_result)
                 stt_key = stt_key.replace("차자", "찾아")
                 stt_key = stt_key.replace("차장", "찾아")
                 stt_key = stt_key.replace("쳐자", "찾아")
                 stt_key = stt_key.replace("애디", "에디")
                 
                 # play_audio("models/temp/stop_recording.wav")
+
+                # [2026-10-06] 대화 모드 시작/종료
+                if stt_key in self.dialog_start_words:
+                    self._set_dialog_mode(True, stt_key)
+                    continue
+                if self.dialog_mode and stt_key in self.dialog_end_words:
+                    self._set_dialog_mode(False, stt_key)
+                    continue
 
                 if stt_key in self.commands:
                     self.get_logger().info("matched and play!")
@@ -421,6 +495,10 @@ class SpeechToCmd(Node):
 
                     self.publisher_cmd.publish(msg)
                     self.get_logger().info(f"Published: {msg.usr_cmd}, {msg.cmd_param}")
+                elif self.dialog_mode:
+                    # [2026-10-06] 대화 모드: 명령이 아닌 문장은 원문 그대로 VLM 자유 질문으로
+                    self.publisher_dialog.publish(String(data=stt_result))
+                    self.get_logger().info(f"Dialog question published: {stt_result}")
                 else:
                     self.get_logger().info("No matched command.")
             except Exception as e:

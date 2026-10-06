@@ -109,7 +109,10 @@ vlm:
     # C: RUN_SAVLM_BRIEF (보행가능해)
     brief: "\n[요약] 이미지를 분석하여 목표 위치 ({goal_x}, {goal_y})를 기반으로 시각 장애인을 위한 간단한 도보 안내를 제공해 주세요."
     # 이전: "이미지를 분석하여 목표 위치 ({goal_x:.4f}, {goal_y:.4f})를 기반으로 보행 가능 여부를 먼저 말하고, 가능하면 이동할 시계 방향과 미터 거리를, 불가능하면 그 이유와 우회 경로 유무를 한두 문장으로 간단히 말해 주세요."
-  
+    # [2026-10-06] 대화 모드 자유 질문 (STT.dialog). {question} = 인식된 문장 원문. 태그가 없으므로 VLM 서버는 free 모드.
+    #   [일반]/[상세]/[요약] 과 달리 앞에 \n 없음 (학습 데이터 형식)
+    dialog: "{question}"
+
 openai_whisper:
   WHISPER_MODEL_NAME: "large-v3-turbo"
   MIC_SAMPLE_RATE: 16000
@@ -120,3 +123,13 @@ openai_whisper:
 STT:
   use_trigger_word: True
   trigger_word: "에디야"
+  # [2026-10-06] 대화 모드: start_words 로 시작, end_words 로 종료 (트리거 단어 없이도 인식, 공백 무시).
+  #   대화 모드 중에도 audio_cmd_list.txt 의 명령은 그대로 동작하고,
+  #   명령에 매칭되지 않는 문장은 원문 그대로 VLM 자유 질문으로 보냄 (/GDH_dialog_text -> image_ai_node, vlm.prompts.dialog)
+  dialog:
+    start_words: ["대화시작", "대화시작해"]
+    end_words: ["대화종료", "대화종료해"]
+    use_timeout: True      # 말이 없으면 자동 종료
+    timeout_sec: 10.0      # 마지막으로 인식된 문장 이후 이 시간(초) 동안 인식된 문장이 없으면 종료
+    start_sentence: "대화를 시작합니다."   # 시작/종료 안내 음성 (빈 문자열이면 안내 안 함)
+    end_sentence: "대화를 종료합니다."

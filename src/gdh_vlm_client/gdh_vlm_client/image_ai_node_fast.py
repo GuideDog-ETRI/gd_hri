@@ -6,6 +6,7 @@ from gd_ifc_pkg.msg import UserCommand
 from gd_ifc_pkg.srv import GDHSpeakText
 from rclpy.qos import QoSPresetProfiles, QoSProfile, ReliabilityPolicy, HistoryPolicy
 from sensor_msgs.msg import CompressedImage
+from std_msgs.msg import String
 from gd_ifc_pkg.srv import GDGGetImageGuidancePoint
 
 # ZMQ
@@ -99,6 +100,8 @@ class QwenImageSubscriberNode(Node):
                 self.cmd_prompts[getattr(UserCommand, cmd_name)] = prompts[key]
             else:
                 self.get_logger().warning(f"UserCommand.{cmd_name} 없음 (gd_ifc_pkg 업데이트 필요) - '{key}' 질문 비활성화")
+        # [2026-10-06] 대화 모드 자유 질문 형식. {question} = 인식된 문장 원문
+        self.dialog_prompt = prompts.get('dialog') or "{question}"
 
         if len(self.htheta_list) != 1:
             self.get_logger().warning("\n\n------------------------------------\n\n")
@@ -168,7 +171,15 @@ class QwenImageSubscriberNode(Node):
             self.command_callback,
             10
         )
-        
+
+        # [2026-10-06] 대화 모드 자유 질문 (speech_to_cmd 가 명령에 매칭되지 않은 문장을 그대로 보냄)
+        self.dialog_sub = self.create_subscription(
+            String,
+            '/GDH_dialog_text',
+            self.dialog_callback,
+            10
+        )
+
         # GDHSpeakText 서비스 클라이언트 생성 (서비스 이름은 '/GDH_speak_text'로 가정)
         self.speak_client = self.create_client(GDHSpeakText, '/GDH_speak_text')
 
@@ -400,8 +411,36 @@ class QwenImageSubscriberNode(Node):
 
         except Exception as e:
             self.get_logger().error(f'Error in command_callback: {e}')
-            
-            
+
+    def dialog_callback(self, msg: String):
+        """[2026-10-06] 대화 모드 자유 질문: 인식된 문장을 최신 프레임과 함께 VLM에 그대로 질문.
+        [일반]/[상세]/[요약] 태그가 없으므로 VLM 서버는 free 모드로 답함"""
+        try:
+            question = msg.data.strip()
+            if not question:
+                return
+
+            with self.image_lock:
+                if self.cv_image_resized is None:
+                    self.get_logger().warning("No image received yet; ignoring dialog question.")
+                    return
+                frame = self.cv_image_resized.copy()
+
+            # 자유 질문은 목표점을 쓰지 않지만 헤더에는 필요 (command_callback 의 기본값)
+            gx, gy = 0.50, 0.75
+            prompt = self.dialog_prompt.format(question=question)
+
+            if not self.wait_for_vlm_server(self.vlm_sub_timeout):
+                self.get_logger().warning(f"VLM 서버가 연결되어 있지 않습니다 (SUB 없음, {self.zmq_pub_addr}) - 전송 취소")
+                return
+
+            self.send_frame(frame, gx, gy, prompt)
+            h, w, _ = frame.shape
+            self.get_logger().info(f"[Producer] Sent frame ({w}x{h}) - Dialog question: {prompt!r}")
+        except Exception as e:
+            self.get_logger().error(f'Error in dialog_callback: {e}')
+
+
     def call_speak_service(self, sentence: str):
         req = GDHSpeakText.Request()
         req.text = sentence
