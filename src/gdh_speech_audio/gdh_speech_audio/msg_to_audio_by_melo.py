@@ -29,7 +29,8 @@ class MsgToAudio(Node):
         self.default_speed = 1.5
         # 서버 주소 (환경 변수로 설정 가능)
         # 'tcp://*:4070'
-        self.server_addr = os.getenv('MELO_TTS_SERVER', 'tcp://127.0.0.1:4070')
+        # self.server_addr = os.getenv('MELO_TTS_SERVER', 'tcp://127.0.0.1:4070')
+        self.server_addr = os.getenv('MELO_TTS_SERVER', 'tcp://192.168.2.12:4070')
         # TTS 서버 초기화 및 연결 시도
         self.init_tts(self.default_speed)
         

@@ -11,10 +11,29 @@ camera:
    - 180
   hfov_vlm: 90
 
+# ricoh theta
 image_name: "/theta/image_raw/compressed"
+# zed
 # image_name: "/zed/zed_node/left/image_rect_color/compressed"
+# d455
+# image_name: "/camera/camera/color/image_raw/compressed"
 do_decompress: True
 do_rectify: True
+
+traffic_light_detection:
+  use_2nd_image: True
+  image_name_2nd: "/camera/camera/color/image_raw"
+  do_decompress: False
+  do_rectify: False
+  filtering_the_max_conf: True
+  # if true, return the bbox with max conf
+  image_freshness_threshold_sec: 1.0
+  # image_freshness: check the image is captured in given seconds.
+  
+subway_gate_detection:
+  filtering_the_max_conf: True
+
+get_gp_name: "/get_image_gp"
 
 odom_name: "/gdq/msg/gdq_odom"
 # odom_name: "/j100_0778/platform/odom/filtered"
@@ -77,7 +96,7 @@ vlm:
   
 openai_whisper:
   WHISPER_MODEL_NAME: "large-v3-turbo"
-  MIC_SAMPLE_RATE: 16_000
+  MIC_SAMPLE_RATE: 16000
   ENERGY_THRESHOLD: 1000
   RECORD_TIMEOUT: 2.0
   PHRASE_TIMEOUT: 1.0

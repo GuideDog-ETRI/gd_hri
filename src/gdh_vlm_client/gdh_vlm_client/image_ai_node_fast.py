@@ -24,6 +24,17 @@ from threading import Lock
 
 from gdh_package.erp_rectify_fast_caching import erp_to_rect
 
+# [2026-06-02] 추가: DISPLAY 소켓 존재 여부로 imshow 가능 여부 판별
+# DISPLAY=:1로 설정되어 있어도 실제 소켓이 /tmp/.X11-unix/X1에 없으면 SIGABRT 발생
+def _check_display() -> bool:
+    """X11 소켓이 실제로 존재하는지 확인하여 imshow 가능 여부 반환."""
+    display = os.environ.get('DISPLAY', '')
+    if not display:
+        return False
+    # ":0" → "0", ":1" → "1" 등으로 변환하여 소켓 경로 확인
+    disp_num = display.lstrip(':').split('.')[0]
+    return os.path.exists(f'/tmp/.X11-unix/X{disp_num}')
+
 qos_profile = QoSPresetProfiles.SENSOR_DATA.value     # SENSOR_DATA: Best-Effort + depth=5(또는 10) 
 # qos_profile = QoSProfile(reliability=ReliabilityPolicy.RELIABLE, history=HistoryPolicy.KEEP_LAST, depth=1)
 
@@ -119,6 +130,10 @@ class QwenImageSubscriberNode(Node):
         self.image_lock = Lock()
         self.cv_image_resized = None
 
+        # [2026-06-02] 추가: X11 소켓 존재 여부 사전 확인 (imshow 안전 호출을 위해)
+        self.display_ok = _check_display()
+        self.get_logger().info(f"Display available: {self.display_ok} (DISPLAY={os.environ.get('DISPLAY', 'not set')})")
+
         # /theta/image_raw/compressed (sensor_msgs/CompressedImage) 구독
         self.image_sub = self.create_subscription(
             CompressedImage,
@@ -159,24 +174,42 @@ class QwenImageSubscriberNode(Node):
 
     def image_callback(self, msg: CompressedImage):
         """/theta/image_raw/compressed 콜백"""
+        # [2026-06-02] 수정: try/except 추가 및 imdecode None 체크, imshow를 display_ok 조건부 호출로 변경
+        # 원본 코드:
+        # def image_callback(self, msg: CompressedImage):
+        #     np_arr = np.frombuffer(msg.data, np.uint8)
+        #     cv_image_erp = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        #     cv_image = erp_to_rect(erp_image=cv_image_erp, theta=self.htheta_rad, hfov=self.hfov_rad, vfov=self.vfov_rad)
+        #     resized = resize_with_long_side(cv_image, 640)
+        #     with self.image_lock:
+        #         self.cv_image_resized = resized
+        #     if self.cv_image_resized is not None:
+        #         cv2.imshow("Received Resized Image", self.cv_image_resized)
+        #         cv2.waitKey(1)
+        try:
+            # 1) CompressedImage -> OpenCV 이미지 디코딩
+            np_arr = np.frombuffer(msg.data, np.uint8)         # bytes -> numpy 배열
+            cv_image_erp = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)  # JPG/PNG 등으로 디코딩
+            if cv_image_erp is None:
+                self.get_logger().warning("imdecode returned None; skipping frame.")
+                return
+            cv_image = erp_to_rect(erp_image=cv_image_erp,
+                                       theta=self.htheta_rad,
+                                       hfov=self.hfov_rad,
+                                       vfov=self.vfov_rad
+                                      )
+            resized = resize_with_long_side(cv_image, 640)
 
-        # 1) CompressedImage -> OpenCV 이미지 디코딩
-        np_arr = np.frombuffer(msg.data, np.uint8)         # bytes -> numpy 배열
-        cv_image_erp = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)  # JPG/PNG 등으로 디코딩
-        cv_image = erp_to_rect(erp_image=cv_image_erp, 
-                                   theta=self.htheta_rad,
-                                   hfov=self.hfov_rad,
-                                   vfov=self.vfov_rad
-                                  )
-        resized = resize_with_long_side(cv_image, 640)
+            with self.image_lock:
+                self.cv_image_resized = resized
 
-        with self.image_lock:
-            self.cv_image_resized = resized
-        
-        # 2) 디코딩된 이미지를 화면에 표시 (imshow)
-        if self.cv_image_resized is not None:
-            cv2.imshow("Received Resized Image", self.cv_image_resized)
-            cv2.waitKey(1)  # 1ms 동안 키 입력 대기 (창 업데이트용)
+            # 2) 디코딩된 이미지를 화면에 표시 (imshow)
+            # [2026-06-02] DISPLAY 소켓이 실제로 존재할 때만 호출 (미연결 시 SIGABRT 방지)
+            if self.display_ok and self.cv_image_resized is not None:
+                cv2.imshow("Received Resized Image", self.cv_image_resized)
+                cv2.waitKey(1)  # 1ms 동안 키 입력 대기 (창 업데이트용)
+        except Exception as e:
+            self.get_logger().error(f'image_callback error: {e}')
         
     def command_callback(self, msg: UserCommand):
         try:    
@@ -188,8 +221,8 @@ class QwenImageSubscriberNode(Node):
                 # Make a time for processing
                 # unknown_sentence = "제가 한번 상황을 확인해보겠습니다."
                 unknown_sentence = "저의 보행상황 설명 AI를 통해 보행로 상황을 확인해보겠습니다."
-                self.call_speak_service(unknown_sentence)
-                self.get_logger().info(f'Calling_speak_service, {unknown_sentence}')
+                # self.call_speak_service(unknown_sentence)
+                # self.get_logger().info(f'Calling_speak_service, {unknown_sentence}')
             
                 with self.image_lock:
                     if self.cv_image_resized is None:
@@ -287,21 +320,25 @@ class QwenImageSubscriberNode(Node):
             if prompt:
                 status_msg += f" - Prompt: {prompt}"
             self.get_logger().info(status_msg)
-            
+
             # 2) 디코딩된 이미지를 화면에 표시 (imshow)
-            if frame is not None:
+            # [2026-06-02] DISPLAY 소켓이 실제로 존재할 때만 호출 (미연결 시 SIGABRT 방지)
+            # 원본 코드:
+            # if frame is not None:
+            #     frame_disp = frame.copy()
+            #     goal_x_w = int(goal_x * img_w)
+            #     goal_y_h = int(goal_y * img_h)
+            #     if use_default_gp: color = (0, 0, 255)
+            #     else: color = (255, 0, 0)
+            #     frame_disp = self.draw_point_on_image(frame_disp, goal_x_w, goal_y_h, color=color)
+            #     cv2.imshow("VLM-inserted Image", frame_disp)
+            #     cv2.waitKey(1)
+            if self.display_ok and frame is not None:
                 frame_disp = frame.copy()
-                
                 goal_x_w = int(goal_x * img_w)
                 goal_y_h = int(goal_y * img_h)
-                
-                if use_default_gp:
-                    color = (0, 0, 255)
-                else:
-                    color = (255, 0, 0)
-                    
+                color = (0, 0, 255) if use_default_gp else (255, 0, 0)
                 frame_disp = self.draw_point_on_image(frame_disp, goal_x_w, goal_y_h, color=color)
-                                            
                 cv2.imshow("VLM-inserted Image", frame_disp)
                 cv2.waitKey(1)  # 1ms 동안 키 입력 대기 (창 업데이트용)
 

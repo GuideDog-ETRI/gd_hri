@@ -1,0 +1,79 @@
+================================================================================
+GDH (Guide Dog HRI) — Claude Code 수정 이력
+================================================================================
+
+--------------------------------------------------------------------------------
+[2026-06-02]  image_ai_node SIGABRT 충돌 원인 분석 및 수정
+--------------------------------------------------------------------------------
+
+■ 증상
+  - "지금 상황 어때" 음성 명령을 인식하지만 이미지 토픽을 받아 TTS로 전달하지 못함
+  - 보행 상황 설명이 출력되지 않음
+
+■ 원인 분석 (로그 확인)
+  - ros2 launch 로그:
+      [ERROR] [image_ai_node-4]: process has died [pid 7622, exit code -6, ...]
+  - exit code -6 = SIGABRT (C 레벨 abort() 호출)
+  - 충돌 시점: 카메라 첫 프레임 수신 후 cv2.imshow() 호출 시
+  - 원인: DISPLAY=:1 으로 설정되어 있으나 실제 X11 소켓은
+           /tmp/.X11-unix/X0 만 존재 → Qt XCB 플러그인이 abort() 호출
+  - image_ai_node 가 죽으면 ZMQ PUB 포트(5555)도 사라지고
+    /GDH_user_cmd 구독자가 없어져 명령이 전달되지 않음
+
+■ 수정 1: src/gdh_vlm_client/gdh_vlm_client/image_ai_node_fast.py
+
+  (1) _check_display() 함수 추가 (모듈 레벨)
+      - X11 소켓(/tmp/.X11-unix/X<N>) 존재 여부로 imshow 가능 여부 사전 판별
+      - DISPLAY=:1 이어도 소켓이 없으면 False 반환
+
+  (2) __init__ 수정
+      - self.display_ok = _check_display() 추가
+      - 시작 시 display 가용 여부를 로그로 출력
+
+  (3) image_callback 수정
+      - 원본: try/except 없이 cv2.imshow 직접 호출
+      - 변경: try/except 추가, cv2.imdecode None 체크 추가
+              cv2.imshow 를 self.display_ok 조건부 호출로 변경
+
+  (4) command_callback 수정
+      - 원본: frame is not None 조건만으로 cv2.imshow 호출
+      - 변경: self.display_ok and frame is not None 조건으로 변경
+
+■ 수정 2: 1run.sh
+
+  - DISPLAY 소켓 자동 교정 로직 추가
+  - 현재 DISPLAY에 해당하는 소켓이 없고 /tmp/.X11-unix/X0 가 존재하면
+    DISPLAY=:0 으로 교정 후 ros2 launch 실행
+
+■ 검토 사항
+  - run_gdh_all.sh 에서 gnome-session 환경의 DISPLAY(=:1)를 읽어오지만
+    실제 X11 소켓은 X0 에만 존재하는 환경 불일치 문제
+  - 추후 run_gdh_all.sh 또는 armctl.sh 에서 컨테이너 실행 시
+    -e DISPLAY=:0 을 명시적으로 전달하는 방식으로 근본 수정 검토 필요
+
+■ 관련 파일
+  - src/gdh_vlm_client/gdh_vlm_client/image_ai_node_fast.py
+  - 1run.sh
+
+--------------------------------------------------------------------------------
+[2026-06-02]  run_gdh_all.sh 재실행 시 image_ai_node 포트 충돌 문제 파악
+--------------------------------------------------------------------------------
+
+■ 증상
+  - run_gdh_all.sh 재실행 후에도 image_ai_node 가 실행되지 않음
+
+■ 원인
+  - 수동으로 시작한 image_ai_node 인스턴스(디버그용)가 ZMQ PUB 포트 5555를 점유
+  - 새로운 ros2 launch 에서 image_ai_node 가 5555 바인딩 실패
+      [ERROR] ZMQ initialization error: Address already in use
+  - 노드 즉시 종료
+
+■ 조치
+  - 수동 인스턴스 종료 후 재시작
+  - 근본 해결: launch 재실행 전 기존 image_ai_node 프로세스 종료 필요
+    (run_gdh_all.sh 에 pkill 추가 검토)
+
+■ 관련 파일
+  - run_gdh_all.sh (미수정, 검토 필요)
+
+================================================================================

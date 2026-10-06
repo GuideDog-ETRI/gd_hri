@@ -51,6 +51,7 @@ import whisper, torch
 import re
 from queue import Queue
 from datetime import datetime, timedelta
+import pyaudio
 
 
 
@@ -93,9 +94,111 @@ class SpeechToTextClient(Node):
         self.recognizer.energy_threshold = self.ENERGY_THRESHOLD
         self.recognizer.dynamic_energy_threshold = False
 
-        self.mic = sr.Microphone(sample_rate=self.MIC_SAMPLE_RATE)
-        with self.mic:
-            self.recognizer.adjust_for_ambient_noise(self.mic, duration=0.5)
+        # Original
+        # self.mic = sr.Microphone(sample_rate=self.MIC_SAMPLE_RATE)
+        # with self.mic:
+        #     self.recognizer.adjust_for_ambient_noise(self.mic, duration=0.5)
+
+        pa = pyaudio.PyAudio()
+        input_candidates = []
+
+        for i in range(pa.get_device_count()):
+            info = pa.get_device_info_by_index(i)
+            name = info.get("name", "")
+            max_in = int(info.get("maxInputChannels", 0))
+            max_out = int(info.get("maxOutputChannels", 0))
+            rate = int(info.get("defaultSampleRate", 16000))
+
+            self.get_logger().info(
+                f"PyAudio device[{i}] name='{name}', in={max_in}, out={max_out}, rate={rate}"
+            )
+
+            if max_in > 0:
+                input_candidates.append((i, name, max_in, rate))
+
+        target = None
+        pulse_device = None
+        for i, name, max_in, rate in input_candidates:
+            lname = name.lower()
+            if "shokz" in lname or "loop110" in lname or "opencomm" in lname:
+                target = (i, name, max_in, rate)
+                break
+            if lname == "pulse" or lname == "default":
+                pulse_device = (i, name, max_in, rate)
+
+        if target is None and pulse_device is not None:
+            import subprocess
+            try:
+                default_src = subprocess.check_output(
+                    ["pactl", "get-default-source"],
+                    env={**os.environ, "PULSE_SERVER": "unix:/run/user/2002/pulse/native"},
+                    timeout=3,
+                ).decode().strip().lower()
+                if "shokz" in default_src or "c0_86_b3_cb_a2_16" in default_src or "opencomm" in default_src:
+                    target = pulse_device
+                    self.get_logger().info(
+                        f"Shokz is PulseAudio default source ({default_src}); "
+                        f"using ALSA 'pulse' device index={pulse_device[0]}"
+                    )
+            except Exception as e:
+                self.get_logger().warn(f"pactl get-default-source failed: {e}")
+
+        if target is None:
+            pa.terminate()
+            raise RuntimeError(
+                "Shokz microphone was not detected as an input device. "
+                f"Input-capable devices found: {input_candidates}"
+            )
+
+        target_index, target_name, target_channels, target_rate = target
+
+        self.get_logger().info(
+            f"Using input microphone device_index={target_index}, "
+            f"name='{target_name}', channels={target_channels}, rate={target_rate}"
+        )
+
+        preferred_rates = [
+            int(self.MIC_SAMPLE_RATE),   # config 값
+            16000,
+            int(target_rate),            # PyAudio defaultSampleRate
+            48000,
+            44100,
+            32000,
+            16000,
+            8000,
+        ]
+
+        actual_rate = self._find_supported_rate(pa, target_index, preferred_rates)
+
+        self.get_logger().info(
+            f"Opening microphone '{target_name}' with sample_rate={actual_rate}"
+        )
+
+        self.mic = sr.Microphone(
+            device_index=target_index,
+            sample_rate=actual_rate,
+            chunk_size=1024,
+        )
+
+        try:
+            with self.mic as source:
+                if source.stream is None:
+                    raise RuntimeError("Microphone stream failed to open")
+
+                self.recognizer.adjust_for_ambient_noise(source, duration=0.5)
+
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to initialize microphone '{target_name}' "
+                f"(index={target_index}, sample_rate={actual_rate}, "
+                f"channels={target_channels}): {e}"
+            )
+
+        # ALSA / USB audio device release 여유 시간
+        self.get_logger().info("Microphone closed after calibration. Waiting before background listen...")
+        time.sleep(1.0)
+
+        pa.terminate()
 
         # 버퍼·큐
         self.data_queue: Queue[bytes] = Queue()
@@ -107,6 +210,29 @@ class SpeechToTextClient(Node):
             self.mic,
             self._record_callback,
             phrase_time_limit=self.RECORD_TIMEOUT,
+        )
+
+    def _find_supported_rate(self, pa, device_index: int, preferred_rates: list[int]) -> int:
+        checked = []
+        for rate in preferred_rates:
+            if rate in checked:
+                continue
+            checked.append(rate)
+            try:
+                pa.is_format_supported(
+                    rate,
+                    input_device=device_index,
+                    input_channels=1,
+                    input_format=pyaudio.paInt16,
+                )
+                self.get_logger().info(f"Supported sample_rate found: {rate}")
+                return rate
+            except Exception as e:
+                self.get_logger().warn(f"sample_rate {rate} not supported: {e}")
+
+        raise RuntimeError(
+            f"No supported sample rate found for device_index={device_index}. "
+            f"Tried: {checked}"
         )
 
     # ───────── 내부 콜백 ─────────
@@ -250,7 +376,7 @@ class SpeechToCmd(Node):
 
         while rclpy.ok():
             try:
-                play_audio("models/temp/start_recording.wav")
+                # play_audio("models/temp/start_recording.wav")
                 self.get_logger().info("Recording…")
 
                 stt_result = self.stt_client.transcribe_once_base()
@@ -265,11 +391,11 @@ class SpeechToCmd(Node):
                 stt_key = stt_key.replace("쳐자", "찾아")
                 stt_key = stt_key.replace("애디", "에디")
                 
-                play_audio("models/temp/stop_recording.wav")
+                # play_audio("models/temp/stop_recording.wav")
 
                 if stt_key in self.commands:
                     self.get_logger().info("matched and play!")
-                    play_audio("models/temp/recognized.ogg")
+                    # play_audio("models/temp/recognized.ogg")
                     info = self.commands[stt_key]
 
                     msg.usr_cmd   = getattr(UserCommand, info["usr_cmd"],   UserCommand.NONE)
