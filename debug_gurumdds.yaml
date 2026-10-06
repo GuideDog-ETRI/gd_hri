@@ -1,0 +1,264 @@
+PARTICIPANT_QOS_DEFAULT:
+  user_data:
+  entity_factory:
+    autoenable_created_entities: true
+
+TOPIC_QOS_DEFAULT:
+  topic_data:
+  durability:
+    kind: VOLATILE_DURABILITY_QOS
+  durability_service:
+    service_cleanup_delay:
+      sec: 0
+      nanosec: 0
+    history_kind: KEEP_LAST_HISTORY_QOS
+    history_depth: 1
+    max_samples: LENGTH_UNLIMITED
+    max_instances: LENGTH_UNLIMITED
+    max_samples_per_instance: LENGTH_UNLIMITED
+  history:
+    kind: KEEP_LAST_HISTORY_QOS
+    depth: 1
+  resource_limits:
+    max_samples: LENGTH_UNLIMITED
+    max_instances: LENGTH_UNLIMITED
+    max_samples_per_instance: LENGTH_UNLIMITED
+  deadline:
+    period:
+      sec: DURATION_INFINITE_SEC
+      nanosec: DURATION_INFINITE_NSEC
+  latency_budget:
+    duration:
+      sec: 0
+      nanosec: 0
+  liveliness:
+    kind: AUTOMATIC_LIVELINESS_QOS
+    lease_duration:
+      sec: DURATION_INFINITE_SEC
+      nanosec: DURATION_INFINITE_NSEC
+  reliability:
+    kind: BEST_EFFORT_RELIABILITY_QOS
+    max_blocking_time:
+      sec: 0
+      nanosec: 0
+  destination_order:
+    kind: BY_RECEPTION_TIMESTAMP_DESTINATIONORDER_QOS
+  transport_priority:
+    value: 0
+  lifespan:
+    duration:
+      sec: DURATION_INFINITE_SEC
+      nanosec: DURATION_INFINITE_NSEC
+  ownership:
+    kind: SHARED_OWNERSHIP_QOS
+  data_representation:
+  - value:
+
+PUBLISHER_QOS_DEFAULT:
+  presentation:
+    access_scope: INSTANCE_PRESENTATION_QOS
+    coherent_access: false
+    ordered_access: false
+  partition:
+  - name:
+  group_data:
+  entity_factory:
+    autoenable_created_entities: true
+
+SUBSCRIBER_QOS_DEFAULT:
+  presentation:
+    access_scope: INSTANCE_PRESENTATION_QOS
+    coherent_access: false
+    ordered_access: false
+  partition:
+  - name:
+  group_data:
+  entity_factory:
+    autoenable_created_entities: true
+
+DATAWRITER_QOS_DEFAULT:
+  durability:
+    kind: VOLATILE_DURABILITY_QOS
+  durability_service:
+    service_cleanup_delay:
+      sec: 0
+      nanosec: 0
+    history_kind: KEEP_LAST_HISTORY_QOS
+    history_depth: 1
+    max_samples: LENGTH_UNLIMITED
+    max_instances: LENGTH_UNLIMITED
+    max_samples_per_instance: LENGTH_UNLIMITED
+  resource_limits:
+    max_samples: LENGTH_UNLIMITED
+    max_instances: LENGTH_UNLIMITED
+    max_samples_per_instance: LENGTH_UNLIMITED
+  deadline:
+    period:
+      sec: DURATION_INFINITE_SEC
+      nanosec: DURATION_INFINITE_NSEC
+  latency_budget:
+    duration:
+      sec: 0
+      nanosec: 0
+  liveliness:
+    kind: AUTOMATIC_LIVELINESS_QOS
+    lease_duration:
+      sec: DURATION_INFINITE_SEC
+      nanosec: DURATION_INFINITE_NSEC
+  reliability:
+    kind: RELIABLE_RELIABILITY_QOS
+    max_blocking_time:
+      sec: 0
+      nanosec: 100000000
+  destination_order:
+    kind: BY_RECEPTION_TIMESTAMP_DESTINATIONORDER_QOS
+  history:
+    kind: KEEP_LAST_HISTORY_QOS
+    depth: 1
+  transport_priority:
+    value: 0
+  lifespan:
+    duration:
+      sec: DURATION_INFINITE_SEC
+      nanosec: DURATION_INFINITE_NSEC
+  user_data:
+  ownership:
+    kind: SHARED_OWNERSHIP_QOS
+  ownership_strength:
+    value: 0
+  writer_data_lifecycle:
+    autodispose_unregistered_instances: true
+  data_representation:
+  - value:
+
+DATAREADER_QOS_DEFAULT:
+  durability:
+    kind: VOLATILE_DURABILITY_QOS
+  deadline:
+    period:
+      sec: DURATION_INFINITE_SEC
+      nanosec: DURATION_INFINITE_NSEC
+  latency_budget:
+    duration:
+      sec: 0
+      nanosec: 0
+  liveliness:
+    kind: AUTOMATIC_LIVELINESS_QOS
+    lease_duration:
+      sec: DURATION_INFINITE_SEC
+      nanosec: DURATION_INFINITE_NSEC
+  reliability:
+    kind: BEST_EFFORT_RELIABILITY_QOS
+    max_blocking_time:
+      sec: 0
+      nanosec: 100000000
+  destination_order:
+    kind: BY_RECEPTION_TIMESTAMP_DESTINATIONORDER_QOS
+  history:
+    kind: KEEP_LAST_HISTORY_QOS
+    depth: 1
+  resource_limits:
+    max_samples: LENGTH_UNLIMITED
+    max_instances: LENGTH_UNLIMITED
+    max_samples_per_instance: LENGTH_UNLIMITED
+  user_data:
+  ownership:
+    kind: SHARED_OWNERSHIP_QOS
+  time_based_filter:
+    minimum_separation:
+      sec: 0
+      nanosec: 0
+  reader_data_lifecycle:
+    autopurge_nowriter_samples_delay:
+      sec: DURATION_INFINITE_SEC
+      nanosec: DURATION_INFINITE_NSEC
+    autopurge_disposed_samples_delay:
+      sec: 0
+      nanosec: 0
+  data_representation:
+  - value:
+  type_consistency:
+    kind: ALLOW_TYPE_COERCION_TYPECONSISTENCY_QOS
+    prevent_type_widening: false
+    ignore_sequence_bounds: true
+    ignore_string_bounds: true
+    ignore_member_names: false
+    force_type_validation: false
+
+PARTICIPANT_ANNOUNCE_DELAY:
+  sec: 0
+  nanosec: 0
+
+PARTICIPANT_ANNOUNCE_INTERVAL:
+  sec: 5
+  nanosec: 0
+
+PARTICIPANT_ANNOUNCE_ASSERT_UNICAST: false # true | false
+
+BUILTIN_HEARTBEAT_INTERVAL:
+  sec: 0
+  nanosec: 15000000
+
+HEARTBEAT_INTERVAL:
+  sec: 3
+  nanosec: 0
+
+HEARTBEAT_PER_MAX_SAMPLES: 8
+
+LEASE_DURATION:
+  sec: 10
+  nanosec: 0
+
+DATA:
+  allow_loopback: true
+  intra_process: false
+  tx_limit: 0 # bps, 0 means unlimited
+  mtu: 8192 # auto | number(1472)
+  buffer_capacity: 512
+  shmem_size: 100 # shared memory pool size in MiB, 0 means disabled
+  data_sharing: # Up to 32 can be set.
+  - topic: "*" # Apply to topics matching the pattern.
+    kind: disable # disable | auto | explicit
+    max_samples: 0 # Use only when 'explicit'
+    max_size_per_sample: 0 # Use only when 'explicit'
+
+MULTICAST_MINIMUM_PARTICIPANT_COUNT: 10
+BATCH_PROCESSING: true
+USE_VENDOR_SPECIFIC_PARAMETER: false
+EVENT_DATA_BUFFER_MAX_SIZE: 1024
+
+WIRE:
+  interface:
+  - domain: default # default | domain-number(11)
+    interface: eth0 # auto | interface-name(eth0) | interface-address(x.x.x.x)
+  rtps:
+    # socket buffer size
+    sndbuf: 10485760
+    rcvbuf: 10485760
+  enable_loopback: false
+  enable_mobility: false # Enable IP mobility for participants set to 'auto' or 'interface-name'
+
+LOGGING:
+  type: stdio # stdout | stderr | stdio | file
+  level: error # | debug | info | warn | error | fatal
+  file:
+    # configuration for file logger
+    path: gurumdds.log.${pid} # ${value} value -> pid | environment variable
+    max_size: 10485760 # maximum log file size in bytes
+    max_rotation: 8 # maximum log file rotation
+    max_lifespan: 0 # maximum log file lifespan in seconds (zero for unlimited lifespan)
+
+MONITORING:
+  enabled: false
+  publication:
+    publication_period: # Publication period of statistics data
+      sec: 1
+      nanosec: 0
+    entities:
+      - DomainParticipantDescription
+      - DomainParticipantEntityStatistics
+      - DataWriterDescription
+      - DataWriterEntityStatistics
+      - DataReaderDescription
+      - DataReaderEntityStatistics
+
