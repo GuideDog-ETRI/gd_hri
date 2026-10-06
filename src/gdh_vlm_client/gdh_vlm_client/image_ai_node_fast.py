@@ -35,8 +35,17 @@ def _check_display() -> bool:
     disp_num = display.lstrip(':').split('.')[0]
     return os.path.exists(f'/tmp/.X11-unix/X{disp_num}')
 
-qos_profile = QoSPresetProfiles.SENSOR_DATA.value     # SENSOR_DATA: Best-Effort + depth=5(또는 10) 
+qos_profile = QoSPresetProfiles.SENSOR_DATA.value     # SENSOR_DATA: Best-Effort + depth=5(또는 10)
 # qos_profile = QoSProfile(reliability=ReliabilityPolicy.RELIABLE, history=HistoryPolicy.KEEP_LAST, depth=1)
+
+# [2026-10-06] guidedog VLM 서버 질문 양식 (src/utils/guidedog-zmq-test.py와 동일, 2026-10-01 RFM lab 메일)
+# {x}/{y}에는 목표 위치(goal)가 들어감. vlm.prompt_mode로 선택
+PROMPTS = {
+    "요약": "[요약] 이미지를 분석하여 목표 위치 ({x}, {y})를 기반으로 시각 장애인을 위한 간단한 도보 안내를 제공해 주세요.",
+    "일반": "[일반] 이미지를 분석하여 목표 위치 ({x}, {y})를 기반으로 시각 장애인을 위한 간단한 도보 안내를 제공해 주세요.",
+    "상세": "[상세] 이미지를 분석하여 목표 위치 ({x}, {y})를 기반으로 장애물의 방향과 위치 정보를 포함한 시각 장애인을 위한 간단한 도보 안내를 제공해 주세요.",
+    "자유": "이 장면에서 보행자가 주의해야 할 점은 무엇인가요?",
+}
 
 def resize_with_long_side(img, long_side=640):
     if img is None:
@@ -117,12 +126,21 @@ class QwenImageSubscriberNode(Node):
             self.get_point_client = None
             self.service_available = False  # 서비스 사용 가능 여부를 추적
         
-        # Initialize ZeroMQ PUB socket
+        # [2026-10-06] VLM 서버 전송 설정 (없으면 기본값)
+        vlm_conf = conf.get('vlm') or {}
+        self.zmq_pub_addr = vlm_conf.get('zmq_pub_addr', "tcp://*:5555")
+        self.vlm_prompt_mode = vlm_conf.get('prompt_mode', "일반")
+        self.vlm_sub_timeout = float(vlm_conf.get('sub_timeout', 1.0))
+
+        # Initialize ZeroMQ XPUB socket
+        # [2026-10-06] PUB -> XPUB: VLM 서버의 SUB가 접속할 때 보내는 구독 메시지를 받아서,
+        # 서버가 붙기 전에 보낸 프레임이 조용히 버려지는 문제(slow joiner)를 막음
         try:
             self.zmq_context = zmq.Context()
-            self.socket = self.zmq_context.socket(zmq.PUB)
-            self.socket.bind("tcp://*:5555")
-            self.get_logger().info("[Producer] PUB socket bound to port 5555.")
+            self.socket = self.zmq_context.socket(zmq.XPUB)
+            self.socket.bind(self.zmq_pub_addr)
+            self.n_sub = 0
+            self.get_logger().info(f"[Producer] XPUB socket bound to {self.zmq_pub_addr}, prompt_mode={self.vlm_prompt_mode!r}")
         except zmq.ZMQError as e:
             self.get_logger().error(f'ZMQ initialization error: {e}')
             raise
@@ -171,6 +189,44 @@ class QwenImageSubscriberNode(Node):
         img_with_point_np = cv2.circle(img_np, (x, y), radius, color, thickness)
 
         return img_with_point_np
+
+    def _drain_sub_events(self):
+        # XPUB 수신 메시지: b'\x01' + topic = 구독, b'\x00' + topic = 구독 해제
+        # poll(0)은 서버 종료(구독 해제) 처리가 덜 끝난 경우 놓칠 수 있어 10ms 대기
+        while self.socket.poll(10):
+            ev = self.socket.recv()
+            self.n_sub = max(0, self.n_sub + (1 if ev[:1] == b"\x01" else -1))
+
+    def wait_for_vlm_server(self, timeout_s):
+        """VLM 서버(SUB)가 연결될 때까지 최대 timeout_s초 대기. 연결되어 있으면 True."""
+        self._drain_sub_events()
+        if self.n_sub > 0:
+            return True
+        deadline = time.time() + timeout_s
+        while self.n_sub == 0:
+            remaining = deadline - time.time()
+            if remaining <= 0 or not self.socket.poll(int(remaining * 1000)):
+                return False
+            self._drain_sub_events()
+        time.sleep(0.2)  # 막 연결된 파이프가 안정될 때까지 잠깐 대기 후 첫 프레임 전송
+        return True
+
+    def build_prompt(self, gx, gy):
+        """prompt_mode: 요약 | 일반 | 상세 | 자유 -> 양식 질문, 빈 값 -> None(서버 -p 프롬프트), 그 외 -> 문자열 그대로"""
+        if not self.vlm_prompt_mode:
+            return None
+        template = PROMPTS.get(self.vlm_prompt_mode, self.vlm_prompt_mode)
+        return template.replace("{x}", str(gx)).replace("{y}", str(gy))
+
+    def send_frame(self, frame, gx, gy, prompt):
+        """[header, BGR image, (question)] 전송. header = struct.pack('iiidff', h, w, c, timestamp, goal_x, goal_y)"""
+        h, w, c = frame.shape
+        header = struct.pack('iiidff', h, w, c, time.time(), gx, gy)
+        assert len(header) == 32, len(header)
+        parts = [header, np.ascontiguousarray(frame).tobytes()]
+        if prompt is not None:
+            parts.append(prompt.encode('utf-8'))
+        self.socket.send_multipart(parts)
 
     def image_callback(self, msg: CompressedImage):
         """/theta/image_raw/compressed 콜백"""
@@ -277,7 +333,7 @@ class QwenImageSubscriberNode(Node):
                                     goal_x = float(response.x) / float(img_w)
                                     goal_y = float(response.y) / float(img_h)
                                     use_default_gp = False
-                                    self.get_logger().info(f'Success to draw guidance point, {response.x (goal_x)}, {response.y (goal_y)}')
+                                    self.get_logger().info(f'Success to draw guidance point, {response.x} ({goal_x:.3f}), {response.y} ({goal_y:.3f})')
                                 else:
                                     self.get_logger().warn(f'Failed to get drawable guidance point: {response.errcode}')
 
@@ -301,22 +357,24 @@ class QwenImageSubscriberNode(Node):
                 self.get_logger().error('No frame available to send.')
                 return
     
-            # Prepare header and payload
+            # [2026-10-06] guidedog-zmq-test.py 방식으로 전송
+            # 원본 코드:
+            # prompt = f"이미지는 실내환경입니다. 이미지를 분석하여 목표 위치 ({goal_x:.4f}, {goal_y:.4f})를 기반으로 시각 장애인을 위한 간단한 도보 안내를 제공해 주세요."
+            # self.socket.send_multipart([header, payload, prompt.encode('utf-8')])
             h, w, c = frame.shape
-            timestamp = time.time()
-            header = struct.pack('iiidff', h, w, c, timestamp, goal_x, goal_y)
-            payload = frame.tobytes()
+            # SA-VLM 질문은 소수점 2자리 goal로 학습됨, 예) "(0.5, 0.55)". 헤더에도 같은 값을 넣음
+            gx, gy = round(goal_x, 2), round(goal_y, 2)
+            prompt = self.build_prompt(gx, gy)
 
-            # Publish via ZMQ
-            prompt = f"이미지는 실내환경입니다. 이미지를 분석하여 목표 위치 ({goal_x:.4f}, {goal_y:.4f})를 기반으로 시각 장애인을 위한 간단한 도보 안내를 제공해 주세요."
-            if prompt:
-                self.socket.send_multipart([header, payload, prompt.encode('utf-8')])
-            else:
-                self.socket.send_multipart([header, payload])
-                
+            # VLM 서버가 구독 중이 아니면 PUB 프레임은 그냥 버려지므로 전송하지 않음
+            if not self.wait_for_vlm_server(self.vlm_sub_timeout):
+                self.get_logger().warning(f"VLM 서버가 연결되어 있지 않습니다 (SUB 없음, {self.zmq_pub_addr}) - 전송 취소")
+                return
+
+            self.send_frame(frame, gx, gy, prompt)
             self.get_logger().info(f"socket.send_multipart via ZMQ.")
 
-            status_msg = f"[Producer] Sent frame ({w}x{h}) - Goal(x,y): ({goal_x:.3f}, {goal_y:.3f})"
+            status_msg = f"[Producer] Sent frame ({w}x{h}) - Goal(x,y): ({gx}, {gy})"
             if prompt:
                 status_msg += f" - Prompt: {prompt}"
             self.get_logger().info(status_msg)
@@ -378,7 +436,7 @@ def main(args=None):
     finally:
         # Clean up ZMQ resources safely
         try:
-            node.socket.close()
+            node.socket.close(linger=0)
             node.zmq_context.term()
         except Exception as e:
             node.get_logger().error(f'Error closing ZMQ: {e}')

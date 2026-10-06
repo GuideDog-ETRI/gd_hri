@@ -93,6 +93,10 @@ vlm:
   # model_path: "Qwen/Qwen2.5-VL-3B-Instruct"
   system_content: "You are a guide dog that delivers information about the surrounding environment to the blind."
   user_content: "Please answer what you see on the floor and translate the whole answer into Korean."
+  # image_ai_node -> guidedog VLM 서버 (ZMQ XPUB)
+  zmq_pub_addr: "tcp://*:5555"
+  prompt_mode: "일반"   # 요약 | 일반 | 상세 | 자유 | "" (질문 없이 전송, 서버 -p 프롬프트) | 그 외 문자열은 그대로 질문으로 전송
+  sub_timeout: 1.0      # VLM 서버(SUB) 연결 대기 시간(초), 넘으면 전송 취소
   
 openai_whisper:
   WHISPER_MODEL_NAME: "large-v3-turbo"
