@@ -398,6 +398,12 @@ class SpeechToCmd(Node):
                     # play_audio("models/temp/recognized.ogg")
                     info = self.commands[stt_key]
 
+                    # [2026-10-06] UserCommand에 없는 명령은 발행하지 않음
+                    # (기본값 NONE=0 은 usr_cmd에서 GO_FORWARD=0 과 같아 전진 명령으로 오인됨)
+                    if not hasattr(UserCommand, info["usr_cmd"]):
+                        self.get_logger().error(f"UserCommand.{info['usr_cmd']} 없음 (gd_ifc_pkg 업데이트 필요) - 발행 안 함")
+                        continue
+
                     msg.usr_cmd   = getattr(UserCommand, info["usr_cmd"],   UserCommand.NONE)
                     msg.cmd_param = getattr(UserCommand, info["cmd_param"], UserCommand.NONE)
 
