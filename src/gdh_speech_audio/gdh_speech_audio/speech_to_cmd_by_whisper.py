@@ -49,6 +49,8 @@ def play_audio_nonblocking(filepath: str):
 
 import os
 import yaml
+import json
+import subprocess
 
 # ──────────────────  Whisper STT  ──────────────────
 import numpy as np
@@ -59,6 +61,24 @@ from queue import Queue
 from datetime import datetime, timedelta
 import pyaudio
 
+# ──────────────────  [2026-10-20] 샥즈 마이크 판별  ──────────────────
+# PyAudio 장치 이름, PulseAudio 소스 이름·설명 공통 (c0_86_b3_cb_a2_16 = OpenComm2 블루투스 주소)
+SHOKZ_KEYWORDS = ("shokz", "opencomm", "loop110", "c0_86_b3_cb_a2_16")
+PACTL_ENV = {**os.environ, "PULSE_SERVER": "unix:/run/user/2002/pulse/native", "LC_ALL": "C"}
+
+def is_shokz(text: str) -> bool:
+    text = (text or "").lower()
+    return any(k in text for k in SHOKZ_KEYWORDS)
+
+def is_shokz_source(source: dict) -> bool:
+    """pactl 소스가 샥즈 마이크인지 (샥즈 출력의 .monitor 는 제외)"""
+    if source["name"].endswith(".monitor"):
+        return False
+    return is_shokz(f"{source['name']} {source.get('description') or ''}")
+
+def pactl_json(*args):
+    out = subprocess.check_output(["pactl", "-f", "json", *args], env=PACTL_ENV, timeout=3)
+    return json.loads(out)
 
 
 class SpeechToTextClient(Node):
@@ -126,28 +146,24 @@ class SpeechToTextClient(Node):
         pulse_device = None
         for i, name, max_in, rate in input_candidates:
             lname = name.lower()
-            if "shokz" in lname or "loop110" in lname or "opencomm" in lname:
+            if is_shokz(name):
                 target = (i, name, max_in, rate)
                 break
             if lname == "pulse" or lname == "default":
                 pulse_device = (i, name, max_in, rate)
 
-        if target is None and pulse_device is not None:
-            import subprocess
-            try:
-                default_src = subprocess.check_output(
-                    ["pactl", "get-default-source"],
-                    env={**os.environ, "PULSE_SERVER": "unix:/run/user/2002/pulse/native"},
-                    timeout=3,
-                ).decode().strip().lower()
-                if "shokz" in default_src or "c0_86_b3_cb_a2_16" in default_src or "opencomm" in default_src:
-                    target = pulse_device
-                    self.get_logger().info(
-                        f"Shokz is PulseAudio default source ({default_src}); "
-                        f"using ALSA 'pulse' device index={pulse_device[0]}"
-                    )
-            except Exception as e:
-                self.get_logger().warn(f"pactl get-default-source failed: {e}")
+        # [2026-10-20] ALSA 'pulse'/'default' 는 그때그때의 기본 입력으로 녹음하므로, 샥즈가 끊기면
+        # 다른 마이크(NoMachine 가상 마이크, THETA Z1 내장 마이크 등)로 조용히 넘어감.
+        # -> 샥즈가 기본 입력이 아니어도 일단 열고, _mic_guard_loop 가 녹음 소스를 샥즈로 고정·감시
+        #    (샥즈로 녹음되지 않는 동안은 음성을 버리고 경고를 계속 출력)
+        # 원본: 샥즈가 PulseAudio 기본 입력일 때만 사용, 아니면 RuntimeError
+        self.mic_guard = target is None and pulse_device is not None
+        if self.mic_guard:
+            target = pulse_device
+            self.get_logger().info(
+                f"Using ALSA '{pulse_device[1]}' device index={pulse_device[0]} via PulseAudio; "
+                f"recording source is pinned to Shokz"
+            )
 
         if target is None:
             pa.terminate()
@@ -189,12 +205,11 @@ class SpeechToTextClient(Node):
         # [2026-10-06] 보정에 쓴 마이크 스트림을 닫지 않고 백그라운드 녹음까지 그대로 사용
         # 원본: with self.mic 로 보정 후 스트림을 닫고 1초 대기 -> listen_in_background 가 스트림을 다시 엶.
         # 쉬고 있던 블루투스 헤드셋 마이크가 막 깨어난 직후에 닫았다 다시 열면 간헐적으로 SIGSEGV(exit code -11) 발생
+        # [2026-10-20] 주변 소음 보정(adjust_for_ambient_noise)은 _listen_loop 에서 샥즈로 녹음될 때 수행
         try:
             source = self.mic.__enter__()
             if source.stream is None:
                 raise RuntimeError("Microphone stream failed to open")
-
-            self.recognizer.adjust_for_ambient_noise(source, duration=0.5)
 
         except Exception as e:
             raise RuntimeError(
@@ -203,7 +218,7 @@ class SpeechToTextClient(Node):
                 f"channels={target_channels}): {e}"
             )
 
-        self.get_logger().info("Microphone calibrated. Keeping the stream open for background listen.")
+        self.get_logger().info("Microphone opened. Keeping the stream open for background listen.")
 
         pa.terminate()
 
@@ -211,6 +226,13 @@ class SpeechToTextClient(Node):
         self.data_queue: Queue[bytes] = Queue()
         self.phrase_bytes: bytes = b""
         self.phrase_time: datetime | None = None
+
+        # [2026-10-20] 녹음 소스 감시 상태. mic_ok 가 False 인 동안 녹음된 음성은 버림
+        self.mic_ok = not self.mic_guard       # 샥즈 장치를 직접 연 경우는 항상 True
+        self.mic_ok_since = time.time()        # 샥즈로 녹음되기 시작한 시각 (이전에 시작된 녹음은 버림)
+        self.need_calibrate = True             # 샥즈로 녹음되기 시작하면 주변 소음 보정
+        if self.mic_guard:
+            threading.Thread(target=self._mic_guard_loop, daemon=True).start()
 
         # 백그라운드 녹음 스레드 (listen_in_background 와 같은 동작, 단 이미 열린 스트림 사용)
         threading.Thread(target=self._listen_loop, daemon=True).start()
@@ -238,9 +260,67 @@ class SpeechToTextClient(Node):
             f"Tried: {checked}"
         )
 
+    # ───────── [2026-10-20] 녹음 소스 감시 ─────────
+    def _mic_guard_loop(self):
+        """0.5초마다 녹음 스트림이 샥즈 소스에 붙어 있는지 확인.
+        다른 소스에 붙어 있으면 샥즈 소스로 옮기고, 샥즈로 녹음되지 않는 동안은 음성을 버리고 경고를 계속 출력"""
+        while rclpy.ok():
+            try:
+                ok, detail = self._pin_to_shokz()
+            except Exception as e:
+                ok, detail = False, f"pactl 확인 실패: {e}"
+
+            if not ok:
+                if self.mic_ok:
+                    self.mic_ok = False
+                    with self.data_queue.mutex:
+                        self.data_queue.queue.clear()
+                self.get_logger().warning(
+                    f"[MIC] 샥즈 마이크로 녹음되지 않음 - 음성 입력 무시 중: {detail}",
+                    throttle_duration_sec=3.0,
+                )
+            elif not self.mic_ok:
+                self.mic_ok_since = time.time()
+                self.need_calibrate = True
+                self.mic_ok = True
+                self.get_logger().info(f"[MIC] 샥즈 마이크로 녹음 중: {detail}")
+
+            time.sleep(0.5)
+
+    def _pin_to_shokz(self) -> tuple[bool, str]:
+        """이 프로세스의 녹음 스트림을 샥즈 소스로 고정. (지금 샥즈로 녹음 중인지, 설명) 반환"""
+        pid = str(os.getpid())
+        stream = next((o for o in pactl_json("list", "source-outputs")
+                       if o.get("properties", {}).get("application.process.id") == pid), None)
+        if stream is None:
+            return False, "녹음 스트림을 찾지 못함"
+
+        sources = pactl_json("list", "sources")
+        current = next((s for s in sources if s["index"] == stream["source"]), None)
+        if current is not None and is_shokz_source(current):
+            return True, current.get("description") or current["name"]
+
+        current_name = (current.get("description") or current["name"]) if current else f"#{stream['source']}"
+        shokz = next((s for s in sources if is_shokz_source(s)), None)
+        if shokz is None:
+            return False, f"샥즈 입력 장치 없음 (블루투스 연결 확인), 현재 녹음 소스: {current_name}"
+
+        # 옮긴 직후는 아직 다른 소스로 녹음된 음성이 섞여 있을 수 있으므로 다음 확인에서 정상 처리
+        subprocess.check_call(["pactl", "move-source-output", str(stream["index"]), shokz["name"]],
+                              env=PACTL_ENV, timeout=3)
+        return False, f"녹음 소스를 '{current_name}' 에서 '{shokz.get('description') or shokz['name']}' 로 옮김"
+
     # ───────── 내부 콜백 ─────────
     def _listen_loop(self):
         while rclpy.ok():
+            # [2026-10-20] 주변 소음 보정은 샥즈로 녹음될 때만 (시작 시, 샥즈가 다시 잡혔을 때)
+            if self.need_calibrate and self.mic_ok:
+                self.need_calibrate = False
+                self.recognizer.energy_threshold = self.ENERGY_THRESHOLD
+                self.recognizer.adjust_for_ambient_noise(self.mic, duration=0.5)
+                self.get_logger().info(f"Microphone calibrated (energy_threshold={self.recognizer.energy_threshold:.0f})")
+
+            started = time.time()
             try:  # 1초씩 듣고 다시 확인 (listen_in_background 와 동일)
                 audio = self.recognizer.listen(self.mic, 1, self.RECORD_TIMEOUT)
             except sr.WaitTimeoutError:
@@ -248,6 +328,10 @@ class SpeechToTextClient(Node):
             except Exception as e:
                 self.get_logger().error(f"Background listen stopped: {e}")
                 raise
+
+            # [2026-10-20] 샥즈가 아닌 소스로 녹음됐을 수 있는 음성은 버림
+            if not self.mic_ok or started < self.mic_ok_since:
+                continue
             self._record_callback(self.recognizer, audio)
 
     def _record_callback(self, _sr, audio: sr.AudioData):
