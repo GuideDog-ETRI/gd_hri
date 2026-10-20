@@ -481,7 +481,8 @@ class SpeechToCmd(Node):
 
                 if stt_key in self.commands:
                     self.get_logger().info("matched and play!")
-                    # play_audio("models/temp/recognized.ogg")
+                    # 인식 알림음: recognized.ogg 대신 TTS 서버에 효과음 재생 요청
+                    self._speak("@play notify")
                     info = self.commands[stt_key]
 
                     # [2026-10-06] UserCommand에 없는 명령은 발행하지 않음

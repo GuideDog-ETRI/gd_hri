@@ -127,8 +127,8 @@ STT:
   #   대화 모드 중에도 audio_cmd_list.txt 의 명령은 그대로 동작하고,
   #   명령에 매칭되지 않는 문장은 원문 그대로 VLM 자유 질문으로 보냄 (/GDH_dialog_text -> image_ai_node, vlm.prompts.dialog)
   dialog:
-    start_words: ["대화시작", "대화시작해"]
-    end_words: ["대화종료", "대화종료해"]
+    start_words: ["대화시작", "대화시작해", "안녕에디"]
+    end_words: ["대화종료", "대화종료해", "그만에디"]
     use_timeout: True      # 말이 없으면 자동 종료
     timeout_sec: 10.0      # 마지막으로 인식된 문장 이후 이 시간(초) 동안 인식된 문장이 없으면 종료
     start_sentence: "대화를 시작합니다."   # 시작/종료 안내 음성 (빈 문자열이면 안내 안 함)
