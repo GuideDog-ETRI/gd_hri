@@ -14,6 +14,10 @@ import struct
 from gd_ifc_pkg.srv import GDHSpeakCodeID
 from gd_ifc_pkg.srv import GDHSpeakText
 
+# [2026-10-23] STT 살아 있음 감시 (/GDH_stt_alive)
+import yaml
+from std_msgs.msg import String
+
 class MsgToAudio(Node):
     def __init__(self):
         super().__init__('msg_to_audio')     # node_name
@@ -33,7 +37,44 @@ class MsgToAudio(Node):
         self.server_addr = os.getenv('MELO_TTS_SERVER', 'tcp://192.168.2.12:4070')
         # TTS 서버 초기화 및 연결 시도
         self.init_tts(self.default_speed)
-        
+
+        # [2026-10-23] STT(pub_command_from_speech_by_w) 감시: STT 가 1초마다 보내는 /GDH_stt_alive 가
+        # down_after_sec 이상 끊기면 "음성 인식 중단" 안내, 다시 들어오면 "다시 시작" 안내.
+        # STT 가 죽으면 STT 스스로는 안내할 수 없으므로 여기서 함 (launch respawn 으로 약 11초 뒤 자동 재시작)
+        alert_conf = {}
+        try:
+            with open('models/gdh_config.yaml') as fid:
+                alert_conf = (yaml.full_load(fid).get('STT') or {}).get('stt_alert') or {}
+        except Exception as e:
+            self.get_logger().warning(f"[STT 감시] gdh_config.yaml 읽기 실패 - 기본값 사용: {e}")
+        self.stt_alert_enable = bool(alert_conf.get('enable', True))
+        self.stt_down_after_sec = float(alert_conf.get('down_after_sec', 3.0))
+        self.stt_down_sentence = alert_conf.get('down_sentence', "음성 인식이 중단되었습니다. 다시 시작하는 중입니다.")
+        self.stt_restored_sentence = alert_conf.get('restored_sentence', "음성 인식이 다시 시작되었습니다.")
+        self.stt_last_alive = None        # 마지막으로 /GDH_stt_alive 를 받은 시각 (None: 아직 한 번도 못 받음 -> 시작 중에는 안내 안 함)
+        self.stt_down_announced = False
+        if self.stt_alert_enable:
+            self.create_subscription(String, '/GDH_stt_alive', self._on_stt_alive, 10)
+            self.create_timer(1.0, self._check_stt_alive)
+
+    def _on_stt_alive(self, msg):
+        """[2026-10-23] STT 살아 있음 신호 수신. 중단 안내를 했던 경우에만 다시 시작 안내"""
+        self.stt_last_alive = time.time()
+        if self.stt_down_announced:
+            self.stt_down_announced = False
+            self.log_info(f"[STT 감시] STT 다시 시작됨 ({msg.data}) - 안내: {self.stt_restored_sentence}")
+            self.send_speech_message(self.stt_restored_sentence)
+
+    def _check_stt_alive(self):
+        """[2026-10-23] 1초마다 확인. 살아 있음 신호가 down_after_sec 이상 끊기면 한 번 안내"""
+        if self.stt_last_alive is None or self.stt_down_announced or not rclpy.ok():
+            return
+        silent = time.time() - self.stt_last_alive
+        if silent >= self.stt_down_after_sec:
+            self.stt_down_announced = True
+            self.get_logger().warning(f"[STT 감시] /GDH_stt_alive {silent:.1f}초 끊김 - 안내: {self.stt_down_sentence}")
+            self.send_speech_message(self.stt_down_sentence)
+
     def init_tts(self, speed):
         # ZMQ 컨텍스트 및 소켓 설정 for melo tts connection
         self.zmq_context = zmq.Context()

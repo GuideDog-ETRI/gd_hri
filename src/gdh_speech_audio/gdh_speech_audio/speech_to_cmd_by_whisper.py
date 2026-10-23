@@ -118,6 +118,8 @@ class SpeechToTextClient(Node):
         self.WHISPER_TEMPERATURE = float(conf['openai_whisper'].get('TEMPERATURE', 0.0))
         # [2026-10-23] 받아쓰기 대기열에서 이보다 오래된 말만 버림 (원본: 받아쓰기 시작할 때마다 모두 버림)
         self.MAX_QUEUE_AGE_SEC   = float(conf['openai_whisper'].get('MAX_QUEUE_AGE_SEC', 5.0))
+        # [2026-10-23] 재시도를 끈 뒤 가끔 같은 말이 반복되는 결과("어, 어, 어, ...") -> 반복이 심하면 버림
+        self.MAX_COMPRESSION_RATIO = float(conf['openai_whisper'].get('MAX_COMPRESSION_RATIO', 2.0))
         # [2026-10-23] 마이크(샥즈)가 끊기거나 다시 연결되면 음성 안내 (로그만으로는 사용자가 알 수 없음)
         alert_conf = (conf.get('STT') or {}).get('mic_alert') or {}
         self.MIC_ALERT_ENABLE   = bool(alert_conf.get('enable', True))
@@ -125,6 +127,8 @@ class SpeechToTextClient(Node):
         self.MIC_ALERT_LOST_SENTENCE     = alert_conf.get('lost_sentence', "마이크 연결이 끊겼습니다. 음성 명령을 들을 수 없습니다.")
         self.MIC_ALERT_RESTORED_SENTENCE = alert_conf.get('restored_sentence', "마이크가 다시 연결되었습니다.")
         self.speak_client = self.create_client(GDHSpeakText, '/GDH_speak_text')
+        # [2026-10-23] STT 가 살아 있음을 1초마다 알림. 끊기면 TTS 노드(msg_to_audio)가 "음성 인식 중단" 안내
+        self.alive_pub = self.create_publisher(String, '/GDH_stt_alive', 10)
 
         self.get_logger().info(f"WHISPER_MODEL_NAME “{self.WHISPER_MODEL_NAME}”…")
         self.get_logger().info(f"MIC_SAMPLE_RATE “{self.MIC_SAMPLE_RATE}”…")
@@ -266,7 +270,10 @@ class SpeechToTextClient(Node):
             threading.Thread(target=self._mic_guard_loop, daemon=True).start()
 
         # 백그라운드 녹음 스레드 (listen_in_background 와 같은 동작, 단 이미 열린 스트림 사용)
-        threading.Thread(target=self._listen_loop, daemon=True).start()
+        # [2026-10-23] 원본: threading.Thread(target=self._listen_loop, daemon=True).start()
+        threading.Thread(target=self._listen_loop_or_exit, daemon=True).start()
+        # [2026-10-23] 녹음을 시작한 뒤부터 살아 있음 신호 (/GDH_stt_alive)
+        threading.Thread(target=self._alive_loop, daemon=True).start()
 
     def _find_supported_rate(self, pa, device_index: int, preferred_rates: list[int]) -> int:
         checked = []
@@ -376,6 +383,25 @@ class SpeechToTextClient(Node):
         return False, f"녹음 소스를 '{current_name}' 에서 '{shokz.get('description') or shokz['name']}' 로 옮김"
 
     # ───────── 내부 콜백 ─────────
+    def _alive_loop(self):
+        """[2026-10-23] 1초마다 /GDH_stt_alive 발행 ("listening" 또는 샥즈로 녹음되지 않을 때 "mic_lost").
+        STT 프로세스가 죽거나 녹음 스레드 오류로 종료되면 끊기므로, TTS 노드가 이를 보고 음성 안내"""
+        while rclpy.ok():
+            try:
+                self.alive_pub.publish(String(data="listening" if self.mic_ok else "mic_lost"))
+            except Exception as e:
+                self.get_logger().warning(f"[STT] /GDH_stt_alive 발행 실패: {e}", throttle_duration_sec=10.0)
+            time.sleep(1.0)
+
+    def _listen_loop_or_exit(self):
+        """[2026-10-23] 녹음 스레드가 오류로 멈추면 프로세스는 살아 있는데 아무것도 못 듣는 상태가 됨
+        (예: 오디오 서버 재시작으로 녹음 스트림이 끊김) -> 프로세스를 종료해 launch 의 respawn 으로 STT 를 다시 띄움"""
+        try:
+            self._listen_loop()
+        except Exception as e:
+            self.get_logger().fatal(f"[STT] 녹음 스레드 오류 - STT 종료 (launch respawn 으로 다시 시작): {e}")
+            os._exit(1)
+
     def _listen_loop(self):
         while rclpy.ok():
             # [2026-10-20] 주변 소음 보정은 샥즈로 녹음될 때만 (시작 시, 샥즈가 다시 잡혔을 때)
@@ -500,6 +526,12 @@ class SpeechToTextClient(Node):
                     # 실측: 실제 말 -0.04~-0.27, 지어낸 문장 -2.6~-7.9 (힌트 문장 사용 시)
                     if logprob is not None and logprob < self.MIN_AVG_LOGPROB:
                         self.get_logger().info(f"[WHISPER] 신뢰도 낮음 (< {self.MIN_AVG_LOGPROB}) - 버림")
+                        continue
+                    # [2026-10-23] 같은 말이 반복되는 결과 버림 (Whisper compression_ratio: 반복이 많을수록 큼)
+                    # 실측(오늘 667건): 실제 명령 문장 최대 1.35, 반복 문장 2.35("전통, 전통, ...")·27.9("어, 어, ...")
+                    ratio = max((s.get("compression_ratio", 0.0) for s in result.get("segments", [])), default=0.0)
+                    if ratio > self.MAX_COMPRESSION_RATIO:
+                        self.get_logger().info(f"[WHISPER] 반복 문장 (compression_ratio {ratio:.2f} > {self.MAX_COMPRESSION_RATIO}) - 버림")
                         continue
                     # [2026-10-06] 원본: text = re.sub(r'[^가-힣]+', '', text) 를 반환 (공백·숫자·문장부호 제거)
                     if re.sub(r'[^가-힣]+', '', text):

@@ -1,6 +1,10 @@
 <launch>
   <node pkg="gdh_speech_audio" exec="srv_play_audio_from_msg_by_m" name="srv_play_audio_from_msg_by_m" output="screen"/>
+  <!-- [2026-10-23] 원본 (STT가 오류로 꺼지면 gdh를 다시 띄울 때까지 음성 명령이 전혀 동작하지 않음)
   <node pkg="gdh_speech_audio" exec="pub_command_from_speech_by_w" name="pub_command_from_speech_by_w" output="screen"/>
+  -->
+  <!-- [2026-10-23] STT가 꺼지면 3초 뒤 자동으로 다시 띄움 (Ctrl+C 로 launch 를 끌 때는 다시 띄우지 않음) -->
+  <node pkg="gdh_speech_audio" exec="pub_command_from_speech_by_w" name="pub_command_from_speech_by_w" output="screen" respawn="true" respawn_delay="3.0"/>
   <node pkg="gdh_package" exec="service" name="service" output="screen"/>
   <node pkg="gdh_vlm_client" exec="image_ai_node" name="image_ai_node" output="screen"/>
 </launch>
