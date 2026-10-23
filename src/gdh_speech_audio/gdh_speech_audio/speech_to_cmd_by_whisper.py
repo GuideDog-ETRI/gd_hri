@@ -114,6 +114,10 @@ class SpeechToTextClient(Node):
         self.MIN_AVG_LOGPROB   = float(conf['openai_whisper'].get('MIN_AVG_LOGPROB', -1.0))
         # self.MAX_ENERGY_THRESHOLD = float(conf['openai_whisper'].get('MAX_ENERGY_THRESHOLD', 1500))  # [2026-10-23] 원본 기본값
         self.MAX_ENERGY_THRESHOLD = float(conf['openai_whisper'].get('MAX_ENERGY_THRESHOLD', 1000))
+        # [2026-10-23] Whisper 재시도(temperature fallback) 끔: 잡음을 받아쓸 때 최대 7.5초 멈춰 다음 명령이 늦거나 무시됨
+        self.WHISPER_TEMPERATURE = float(conf['openai_whisper'].get('TEMPERATURE', 0.0))
+        # [2026-10-23] 받아쓰기 대기열에서 이보다 오래된 말만 버림 (원본: 받아쓰기 시작할 때마다 모두 버림)
+        self.MAX_QUEUE_AGE_SEC   = float(conf['openai_whisper'].get('MAX_QUEUE_AGE_SEC', 5.0))
         # [2026-10-23] 마이크(샥즈)가 끊기거나 다시 연결되면 음성 안내 (로그만으로는 사용자가 알 수 없음)
         alert_conf = (conf.get('STT') or {}).get('mic_alert') or {}
         self.MIC_ALERT_ENABLE   = bool(alert_conf.get('enable', True))
@@ -128,7 +132,8 @@ class SpeechToTextClient(Node):
         self.get_logger().info(f"RECORD_TIMEOUT “{self.RECORD_TIMEOUT}”…")
         self.get_logger().info(f"PHRASE_TIMEOUT “{self.PHRASE_TIMEOUT}”…")
         self.get_logger().info(f"LANGUAGE “{self.WHISPER_LANGUAGE}”, INITIAL_PROMPT “{self.INITIAL_PROMPT}”, "
-                               f"MIN_AVG_LOGPROB {self.MIN_AVG_LOGPROB}, MAX_ENERGY_THRESHOLD {self.MAX_ENERGY_THRESHOLD:.0f}")
+                               f"MIN_AVG_LOGPROB {self.MIN_AVG_LOGPROB}, MAX_ENERGY_THRESHOLD {self.MAX_ENERGY_THRESHOLD:.0f}, "
+                               f"TEMPERATURE {self.WHISPER_TEMPERATURE}, MAX_QUEUE_AGE_SEC {self.MAX_QUEUE_AGE_SEC}")
         
         # Whisper 모델
         self.get_logger().info(f"Loading Whisper model “{self.WHISPER_MODEL_NAME}”…")
@@ -243,7 +248,10 @@ class SpeechToTextClient(Node):
         pa.terminate()
 
         # 버퍼·큐
-        self.data_queue: Queue[bytes] = Queue()
+        # [2026-10-23] 원본: self.data_queue: Queue[bytes] = Queue()
+        # 말 하나 = (PCM, RECORD_TIMEOUT 에서 잘렸는지, 대기열에 넣은 시각)
+        self.data_queue: Queue[tuple[bytes, bool, float]] = Queue()
+        self.prev_cut = False                  # [2026-10-23] 앞 말이 잘렸으면 다음 말을 이어 붙임
         self.phrase_bytes: bytes = b""
         self.phrase_time: datetime | None = None
 
@@ -408,10 +416,14 @@ class SpeechToTextClient(Node):
             self.get_logger().info(
                 f"[VOICE] {dur:.1f}s rms={rms:.0f} (기준 {self.recognizer.energy_threshold:.0f})"
                 f"{' - RECORD_TIMEOUT 에서 잘림' if cut else ''} -> Whisper")
-            self._record_callback(self.recognizer, audio)
+            # [2026-10-23] 원본: self._record_callback(self.recognizer, audio)
+            self._record_callback(self.recognizer, audio, cut)
 
-    def _record_callback(self, _sr, audio: sr.AudioData):
-        self.data_queue.put(audio.get_raw_data())
+    # [2026-10-23] 원본
+    # def _record_callback(self, _sr, audio: sr.AudioData):
+    #     self.data_queue.put(audio.get_raw_data())
+    def _record_callback(self, _sr, audio: sr.AudioData, cut: bool = False):
+        self.data_queue.put((audio.get_raw_data(), cut, time.time()))
 
     # ───────── 외부 API ─────────
     def transcribe_once_base(self, timeout_sec: float | None = None) -> str | None:
@@ -422,22 +434,43 @@ class SpeechToTextClient(Node):
 
         # buffer initialization
         self.phrase_bytes = b""
+        self.prev_cut = False
+        # [2026-10-23] 원본 (받아쓰기를 시작할 때마다 대기열을 모두 비움 -> 앞 문장을 처리하는 동안 한 말이 버려질 수 있음)
+        # with self.data_queue.mutex:
+        #     self.data_queue.queue.clear()
+        # MAX_QUEUE_AGE_SEC 보다 오래된 말만 버림
         with self.data_queue.mutex:
+            now_t = time.time()
+            fresh = [item for item in self.data_queue.queue if now_t - item[2] <= self.MAX_QUEUE_AGE_SEC]
+            dropped = len(self.data_queue.queue) - len(fresh)
             self.data_queue.queue.clear()
-            
+            self.data_queue.queue.extend(fresh)
+        if dropped:
+            self.get_logger().info(f"[VOICE] {self.MAX_QUEUE_AGE_SEC:.0f}초 넘게 지난 말 {dropped}개 버림")
+
         while rclpy.ok():
             if not self.data_queue.empty():
-                now = datetime.utcnow()
+                # [2026-10-23] 원본 (대기열에 쌓인 말을 모두 이어 붙여 한 번에 받아씀)
+                #   -> Whisper 가 느린 동안 쌓인 서로 다른 말이 합쳐져 명령 매칭 실패
+                #      (실측: "지하철 입구 찾아. 화이트 노이즈를 좀 섞어야 될 것 같은데.")
+                # now = datetime.utcnow()
+                #
+                # # 침묵이 길었다면 새 문장
+                # if self.phrase_time and (now - self.phrase_time) > timedelta(seconds=self.PHRASE_TIMEOUT):
+                #     self.phrase_bytes = b""
+                #
+                # self.phrase_time = now
+                #
+                # # 큐 비우기
+                # while not self.data_queue.empty():
+                #     self.phrase_bytes += self.data_queue.get()
 
-                # 침묵이 길었다면 새 문장
-                if self.phrase_time and (now - self.phrase_time) > timedelta(seconds=self.PHRASE_TIMEOUT):
+                # 말 하나씩 받아씀. 앞 말이 RECORD_TIMEOUT 에서 잘린 경우에만 이어 붙임 (같은 문장의 뒷부분)
+                data, cut, _ = self.data_queue.get()
+                if not self.prev_cut:
                     self.phrase_bytes = b""
-
-                self.phrase_time = now
-
-                # 큐 비우기
-                while not self.data_queue.empty():
-                    self.phrase_bytes += self.data_queue.get()
+                self.phrase_bytes += data
+                self.prev_cut = cut
 
                 # PCM int16 → float32(-1~1)
                 audio_np = (np.frombuffer(self.phrase_bytes, dtype=np.int16)
@@ -455,6 +488,8 @@ class SpeechToTextClient(Node):
                         fp16=torch.cuda.is_available(),
                         language=self.WHISPER_LANGUAGE,
                         initial_prompt=self.INITIAL_PROMPT,
+                        # [2026-10-23] 원본: temperature 지정 없음 (기본 0.0~1.0 최대 6번 재시도 -> 잡음에서 최대 7.5초)
+                        temperature=self.WHISPER_TEMPERATURE,
                     )
                     text = result["text"].strip()
                     logprob = min((s["avg_logprob"] for s in result.get("segments", [])), default=None)
@@ -511,7 +546,8 @@ class SpeechToTextClient(Node):
                 # 문장 이어쓰기
                 self.phrase_time = now
                 while not self.data_queue.empty():
-                    self.phrase_bytes += self.data_queue.get()
+                    # [2026-10-23] 원본: self.phrase_bytes += self.data_queue.get()  (대기열 항목이 (PCM, 잘림, 시각) 으로 바뀜)
+                    self.phrase_bytes += self.data_queue.get()[0]
     
             else:
                 rclpy.spin_once(self, timeout_sec=0.1)

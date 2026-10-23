@@ -183,6 +183,11 @@ GDH (GuideDog HRI) module packages
         | 재부팅 때 컨테이너가 사용자 오디오보다 먼저 시작되면 컨테이너 안 `/run/user/2002/pulse`가 빈 폴더로 보여 STT가 마이크를 전혀 못 씀 (실측: 오디오 소켓 13:22:30.11, 컨테이너 13:22:31.63 — 1.5초 차이) | `~/run_gdh_all.sh`, `~/run_gdh_all_vlm2.sh`, `~/run_gdh_all_vlm3.sh` (백업 `*.bak_pulse_20261023_135614`) | 호스트 소켓을 최대 30초 기다린 뒤, 컨테이너 안에 소켓이 없으면 `docker restart thor_gdh` (`scripts/run_gds.sh`의 `ensure_pulse_in_container`와 같은 방식) |
         | 위와 같음 (armctl로 gdh를 직접 띄우는 경우) | `1run.sh` | 컨테이너 안에 소켓이 없으면 경고 출력 ("호스트에서 docker restart thor_gdh 후 다시 실행") |
         | 샥즈가 끊겨도 로그에만 남아 사용자가 음성 명령이 무시되는 것을 모름 | `speech_to_cmd_by_whisper.py` `_mic_guard_loop()`, `_speak()` / `gdh_config.yaml` `STT.mic_alert` | `lost_after_sec`(5초) 이상 샥즈로 녹음되지 않으면 "마이크 연결이 끊겼습니다. 음성 명령을 들을 수 없습니다." 한 번 안내, 다시 연결되면 "마이크가 다시 연결되었습니다." (끊김 안내를 한 경우만). 시작·재연결 중 잠깐 끊기는 것, `pactl` 응답 지연은 안내 안 함 |
+        | Whisper가 잡음을 받아쓸 때 재시도(temperature fallback, 최대 6번)를 반복해 최대 7.5초 멈춤 → 그동안 한 명령이 늦게 처리됨 (오늘 382건 중 41건이 0.5초 초과) | `transcribe_once_base()` / `gdh_config.yaml` `openai_whisper.TEMPERATURE: 0.0` | 재시도 끔. 시험: 실제 말은 결과·속도 동일(0.16~0.19초), 잡음은 1.55~5.63초 → 0.14~0.18초. 재시도 없이 나온 지어낸 문장은 확신도 -2.0~-2.5라 기존 필터(-1.0)로 걸러짐 |
+        | Whisper가 느린 동안 쌓인 서로 다른 말을 모두 이어 붙여 한 번에 받아써 명령 매칭 실패 (실측 12:12: "지하철 입구 찾아. 화이트 노이즈를 좀 섞어야 될 것 같은데.") | `transcribe_once_base()`, `_listen_loop()`, `_record_callback()` | 말을 하나씩 받아씀. 앞 말이 `RECORD_TIMEOUT`에서 잘린 경우에만 다음 말을 이어 붙임 (대기열 항목: (PCM, 잘림 여부, 넣은 시각)). `PHRASE_TIMEOUT`은 `transcribe_once_base()`에서 더 이상 안 씀 |
+        | 받아쓰기를 시작할 때마다 대기열을 모두 비워, 앞 문장을 처리하는 동안 한 명령이 버려질 수 있음 | `transcribe_once_base()` / `gdh_config.yaml` `openai_whisper.MAX_QUEUE_AGE_SEC: 5.0` | `MAX_QUEUE_AGE_SEC`(5초)보다 오래된 말만 버림 |
+        | "노은역으로"를 "로운역으로", "노은력으로", "노은욕으로", "노역으로", "지하철역으로"로 잘못 받아써 매칭 실패 | `models/audio_cmd_list.txt` | 다섯 표현을 `MOVE_MAP_NOUEN`으로 추가 ("노은역으로" 바로 아래). 이 파일은 모든 줄이 `키\|명령\|파라미터` 형식이어야 해서(주석·빈 줄 넣으면 gdh 시작 시 오류) 이유는 여기에만 기록 |
+        - 시험 (가짜 Whisper): 바쁜 동안 쌓인 두 명령은 각각 처리, 잡음 다음 "멈춰"는 잡음과 붙지 않음, 잘린 문장은 뒷부분과 이어 붙음, 8초 지난 말만 버림
         - 안내 음성은 `/GDH_speak_text` → TTS 서버(192.168.2.12)에서 재생되므로, TTS가 샥즈로 나오는 구성이면 샥즈가 꺼진 동안의 끊김 안내는 들리지 않음
 
 ## 3.3. GDH Heartbeat status
