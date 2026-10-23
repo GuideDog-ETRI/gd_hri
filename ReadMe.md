@@ -177,6 +177,13 @@ GDH (GuideDog HRI) module packages
         - 메인 WirePlumber(`systemd --user`, `PIPEWIRE_REMOTE` 없음)에는 영향 없음
         - 적용 결과: `pactl` 응답 2.8~10초 → 12~18ms, 사운드카드 쟁탈(`ReserveDevice1.Audio0/1`) 1분 19~34회 → 0회
         - `node.cfg`는 세션이 시작될 때 읽으므로, 이전에 만들어진 NoMachine 세션은 종료(또는 재부팅) 후 완전히 적용됨
+    * [2026-10-23 추가] 점검에서 나온 문제 수정
+        | 문제 | 수정한 곳 | 수정 내용 |
+        |---|---|---|
+        | 재부팅 때 컨테이너가 사용자 오디오보다 먼저 시작되면 컨테이너 안 `/run/user/2002/pulse`가 빈 폴더로 보여 STT가 마이크를 전혀 못 씀 (실측: 오디오 소켓 13:22:30.11, 컨테이너 13:22:31.63 — 1.5초 차이) | `~/run_gdh_all.sh`, `~/run_gdh_all_vlm2.sh`, `~/run_gdh_all_vlm3.sh` (백업 `*.bak_pulse_20261023_135614`) | 호스트 소켓을 최대 30초 기다린 뒤, 컨테이너 안에 소켓이 없으면 `docker restart thor_gdh` (`scripts/run_gds.sh`의 `ensure_pulse_in_container`와 같은 방식) |
+        | 위와 같음 (armctl로 gdh를 직접 띄우는 경우) | `1run.sh` | 컨테이너 안에 소켓이 없으면 경고 출력 ("호스트에서 docker restart thor_gdh 후 다시 실행") |
+        | 샥즈가 끊겨도 로그에만 남아 사용자가 음성 명령이 무시되는 것을 모름 | `speech_to_cmd_by_whisper.py` `_mic_guard_loop()`, `_speak()` / `gdh_config.yaml` `STT.mic_alert` | `lost_after_sec`(5초) 이상 샥즈로 녹음되지 않으면 "마이크 연결이 끊겼습니다. 음성 명령을 들을 수 없습니다." 한 번 안내, 다시 연결되면 "마이크가 다시 연결되었습니다." (끊김 안내를 한 경우만). 시작·재연결 중 잠깐 끊기는 것, `pactl` 응답 지연은 안내 안 함 |
+        - 안내 음성은 `/GDH_speak_text` → TTS 서버(192.168.2.12)에서 재생되므로, TTS가 샥즈로 나오는 구성이면 샥즈가 꺼진 동안의 끊김 안내는 들리지 않음
 
 ## 3.3. GDH Heartbeat status
 - (A) Run GDH node

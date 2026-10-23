@@ -114,6 +114,13 @@ class SpeechToTextClient(Node):
         self.MIN_AVG_LOGPROB   = float(conf['openai_whisper'].get('MIN_AVG_LOGPROB', -1.0))
         # self.MAX_ENERGY_THRESHOLD = float(conf['openai_whisper'].get('MAX_ENERGY_THRESHOLD', 1500))  # [2026-10-23] 원본 기본값
         self.MAX_ENERGY_THRESHOLD = float(conf['openai_whisper'].get('MAX_ENERGY_THRESHOLD', 1000))
+        # [2026-10-23] 마이크(샥즈)가 끊기거나 다시 연결되면 음성 안내 (로그만으로는 사용자가 알 수 없음)
+        alert_conf = (conf.get('STT') or {}).get('mic_alert') or {}
+        self.MIC_ALERT_ENABLE   = bool(alert_conf.get('enable', True))
+        self.MIC_ALERT_LOST_SEC = float(alert_conf.get('lost_after_sec', 5.0))
+        self.MIC_ALERT_LOST_SENTENCE     = alert_conf.get('lost_sentence', "마이크 연결이 끊겼습니다. 음성 명령을 들을 수 없습니다.")
+        self.MIC_ALERT_RESTORED_SENTENCE = alert_conf.get('restored_sentence', "마이크가 다시 연결되었습니다.")
+        self.speak_client = self.create_client(GDHSpeakText, '/GDH_speak_text')
 
         self.get_logger().info(f"WHISPER_MODEL_NAME “{self.WHISPER_MODEL_NAME}”…")
         self.get_logger().info(f"MIC_SAMPLE_RATE “{self.MIC_SAMPLE_RATE}”…")
@@ -244,6 +251,9 @@ class SpeechToTextClient(Node):
         self.mic_ok = not self.mic_guard       # 샥즈 장치를 직접 연 경우는 항상 True
         self.mic_ok_since = time.time()        # 샥즈로 녹음되기 시작한 시각 (이전에 시작된 녹음은 버림)
         self.need_calibrate = True             # 샥즈로 녹음되기 시작하면 주변 소음 보정
+        # [2026-10-23] 마이크 끊김 안내 상태: 샥즈로 녹음되지 않기 시작한 시각, 끊김 안내를 했는지
+        self.mic_lost_since = time.time()
+        self.mic_lost_announced = False
         if self.mic_guard:
             threading.Thread(target=self._mic_guard_loop, daemon=True).start()
 
@@ -294,19 +304,42 @@ class SpeechToTextClient(Node):
             if not ok:
                 if self.mic_ok:
                     self.mic_ok = False
+                    self.mic_lost_since = time.time()   # [2026-10-23] 끊김 안내용
                     with self.data_queue.mutex:
                         self.data_queue.queue.clear()
                 self.get_logger().warning(
                     f"[MIC] 샥즈 마이크로 녹음되지 않음 - 음성 입력 무시 중: {detail}",
                     throttle_duration_sec=3.0,
                 )
+                # [2026-10-23] lost_after_sec 이상 샥즈로 녹음되지 않으면 한 번 음성 안내
+                if (self.MIC_ALERT_ENABLE and not self.mic_lost_announced
+                        and time.time() - self.mic_lost_since >= self.MIC_ALERT_LOST_SEC):
+                    self.mic_lost_announced = self._speak(self.MIC_ALERT_LOST_SENTENCE)
             elif not self.mic_ok:
                 self.mic_ok_since = time.time()
                 self.need_calibrate = True
                 self.mic_ok = True
                 self.get_logger().info(f"[MIC] 샥즈 마이크로 녹음 중: {detail}")
+                # [2026-10-23] 끊김 안내를 했던 경우에만 복구 안내
+                if self.mic_lost_announced:
+                    self._speak(self.MIC_ALERT_RESTORED_SENTENCE)
+                    self.mic_lost_announced = False
 
             time.sleep(0.5)
+
+    def _speak(self, text: str) -> bool:
+        """[2026-10-23] 마이크 상태 안내 음성 (msg_to_audio 의 /GDH_speak_text). 응답은 기다리지 않음.
+        서비스가 아직 없으면 False (다음 확인 때 다시 시도)"""
+        if not text:
+            return True
+        if not self.speak_client.service_is_ready():
+            self.get_logger().warning(f"[MIC] /GDH_speak_text 서비스 없음 - 안내 대기: {text}", throttle_duration_sec=10.0)
+            return False
+        req = GDHSpeakText.Request()
+        req.text = text
+        self.speak_client.call_async(req)
+        self.get_logger().info(f"[MIC] 안내: {text}")
+        return True
 
     def _pin_to_shokz(self) -> tuple[bool, str]:
         """이 프로세스의 녹음 스트림을 샥즈 소스로 고정. (지금 샥즈로 녹음 중인지, 설명) 반환"""
