@@ -65,6 +65,9 @@ import pyaudio
 # PyAudio 장치 이름, PulseAudio 소스 이름·설명 공통 (c0_86_b3_cb_a2_16 = OpenComm2 블루투스 주소)
 SHOKZ_KEYWORDS = ("shokz", "opencomm", "loop110", "c0_86_b3_cb_a2_16")
 PACTL_ENV = {**os.environ, "PULSE_SERVER": "unix:/run/user/2002/pulse/native", "LC_ALL": "C"}
+# [2026-10-23] 오디오 서버가 바쁠 때 pactl 응답이 3~5초 걸림 (NoMachine 접속 시 WirePlumber 2개가 사운드카드 경쟁)
+# 기존 timeout=3 -> 수시로 timeout 나서 샥즈로 녹음 중인데도 음성을 버림
+PACTL_TIMEOUT = 10
 
 def is_shokz(text: str) -> bool:
     text = (text or "").lower()
@@ -77,7 +80,9 @@ def is_shokz_source(source: dict) -> bool:
     return is_shokz(f"{source['name']} {source.get('description') or ''}")
 
 def pactl_json(*args):
-    out = subprocess.check_output(["pactl", "-f", "json", *args], env=PACTL_ENV, timeout=3)
+    # [2026-10-23] 원본 (timeout=3)
+    # out = subprocess.check_output(["pactl", "-f", "json", *args], env=PACTL_ENV, timeout=3)
+    out = subprocess.check_output(["pactl", "-f", "json", *args], env=PACTL_ENV, timeout=PACTL_TIMEOUT)
     return json.loads(out)
 
 
@@ -103,12 +108,20 @@ class SpeechToTextClient(Node):
         self.ENERGY_THRESHOLD  = conf['openai_whisper']['ENERGY_THRESHOLD']
         self.RECORD_TIMEOUT    = conf['openai_whisper']['RECORD_TIMEOUT']
         self.PHRASE_TIMEOUT    = conf['openai_whisper']['PHRASE_TIMEOUT']
-        
+        # [2026-10-23] Whisper 인식 언어·힌트 문장·환각 필터, 주변 소음 보정 상한 (없으면 기본값)
+        self.WHISPER_LANGUAGE  = conf['openai_whisper'].get('LANGUAGE', 'ko')
+        self.INITIAL_PROMPT    = conf['openai_whisper'].get('INITIAL_PROMPT') or None
+        self.MIN_AVG_LOGPROB   = float(conf['openai_whisper'].get('MIN_AVG_LOGPROB', -1.0))
+        # self.MAX_ENERGY_THRESHOLD = float(conf['openai_whisper'].get('MAX_ENERGY_THRESHOLD', 1500))  # [2026-10-23] 원본 기본값
+        self.MAX_ENERGY_THRESHOLD = float(conf['openai_whisper'].get('MAX_ENERGY_THRESHOLD', 1000))
+
         self.get_logger().info(f"WHISPER_MODEL_NAME “{self.WHISPER_MODEL_NAME}”…")
         self.get_logger().info(f"MIC_SAMPLE_RATE “{self.MIC_SAMPLE_RATE}”…")
         self.get_logger().info(f"ENERGY_THRESHOLD “{self.ENERGY_THRESHOLD}”…")
         self.get_logger().info(f"RECORD_TIMEOUT “{self.RECORD_TIMEOUT}”…")
         self.get_logger().info(f"PHRASE_TIMEOUT “{self.PHRASE_TIMEOUT}”…")
+        self.get_logger().info(f"LANGUAGE “{self.WHISPER_LANGUAGE}”, INITIAL_PROMPT “{self.INITIAL_PROMPT}”, "
+                               f"MIN_AVG_LOGPROB {self.MIN_AVG_LOGPROB}, MAX_ENERGY_THRESHOLD {self.MAX_ENERGY_THRESHOLD:.0f}")
         
         # Whisper 모델
         self.get_logger().info(f"Loading Whisper model “{self.WHISPER_MODEL_NAME}”…")
@@ -268,7 +281,15 @@ class SpeechToTextClient(Node):
             try:
                 ok, detail = self._pin_to_shokz()
             except Exception as e:
-                ok, detail = False, f"pactl 확인 실패: {e}"
+                # [2026-10-23] pactl 실패(응답 지연)는 샥즈가 아니라는 뜻이 아님 -> 직전 상태 유지
+                # 원본 (샥즈로 녹음 중인데도 음성을 버리고 다시 보정 -> 실측: 시간의 약 2/3 동안 음성 무시)
+                # ok, detail = False, f"pactl 확인 실패: {e}"
+                self.get_logger().warning(
+                    f"[MIC] pactl 확인 실패 - 직전 상태 유지 ({'샥즈 녹음 중' if self.mic_ok else '음성 무시 중'}): {e}",
+                    throttle_duration_sec=10.0,
+                )
+                time.sleep(0.5)
+                continue
 
             if not ok:
                 if self.mic_ok:
@@ -306,8 +327,11 @@ class SpeechToTextClient(Node):
             return False, f"샥즈 입력 장치 없음 (블루투스 연결 확인), 현재 녹음 소스: {current_name}"
 
         # 옮긴 직후는 아직 다른 소스로 녹음된 음성이 섞여 있을 수 있으므로 다음 확인에서 정상 처리
+        # [2026-10-23] 원본 (timeout=3)
+        # subprocess.check_call(["pactl", "move-source-output", str(stream["index"]), shokz["name"]],
+        #                       env=PACTL_ENV, timeout=3)
         subprocess.check_call(["pactl", "move-source-output", str(stream["index"]), shokz["name"]],
-                              env=PACTL_ENV, timeout=3)
+                              env=PACTL_ENV, timeout=PACTL_TIMEOUT)
         return False, f"녹음 소스를 '{current_name}' 에서 '{shokz.get('description') or shokz['name']}' 로 옮김"
 
     # ───────── 내부 콜백 ─────────
@@ -318,6 +342,12 @@ class SpeechToTextClient(Node):
                 self.need_calibrate = False
                 self.recognizer.energy_threshold = self.ENERGY_THRESHOLD
                 self.recognizer.adjust_for_ambient_noise(self.mic, duration=0.5)
+                # [2026-10-23] 보정 중에 말소리가 섞이면 기준이 2000~3500 으로 튀어 평소 말소리를 놓침 -> 상한 적용
+                if self.recognizer.energy_threshold > self.MAX_ENERGY_THRESHOLD:
+                    self.get_logger().warning(
+                        f"Microphone calibration too high ({self.recognizer.energy_threshold:.0f}, 보정 중 말소리 섞임) "
+                        f"-> {self.MAX_ENERGY_THRESHOLD:.0f}")
+                    self.recognizer.energy_threshold = self.MAX_ENERGY_THRESHOLD
                 self.get_logger().info(f"Microphone calibrated (energy_threshold={self.recognizer.energy_threshold:.0f})")
 
             started = time.time()
@@ -329,9 +359,22 @@ class SpeechToTextClient(Node):
                 self.get_logger().error(f"Background listen stopped: {e}")
                 raise
 
+            # [2026-10-23] 진단 로그: 말소리 하나마다 길이·크기·처리 결과
+            raw = audio.get_raw_data()
+            pcm = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
+            dur = len(pcm) / audio.sample_rate
+            rms = float(np.sqrt(np.mean(pcm ** 2))) if len(pcm) else 0.0
+            tail = pcm[-int(0.3 * audio.sample_rate):]
+            # 정상적으로 끝난 말은 끝에 침묵이 붙음. 끝까지 소리가 크면 RECORD_TIMEOUT 에서 잘린 것
+            cut = len(tail) > 0 and float(np.sqrt(np.mean(tail ** 2))) > self.recognizer.energy_threshold
+
             # [2026-10-20] 샥즈가 아닌 소스로 녹음됐을 수 있는 음성은 버림
             if not self.mic_ok or started < self.mic_ok_since:
+                self.get_logger().info(f"[VOICE] {dur:.1f}s rms={rms:.0f} -> 버림 (샥즈 녹음 상태 아님)")
                 continue
+            self.get_logger().info(
+                f"[VOICE] {dur:.1f}s rms={rms:.0f} (기준 {self.recognizer.energy_threshold:.0f})"
+                f"{' - RECORD_TIMEOUT 에서 잘림' if cut else ''} -> Whisper")
             self._record_callback(self.recognizer, audio)
 
     def _record_callback(self, _sr, audio: sr.AudioData):
@@ -367,11 +410,29 @@ class SpeechToTextClient(Node):
                 audio_np = (np.frombuffer(self.phrase_bytes, dtype=np.int16)
                             .astype(np.float32) / 32768.0)
                 try:
+                    # [2026-10-23] 언어 고정 + 호출어/명령 힌트 문장 ("에디야"가 "애리야"로 들리던 문제)
+                    # 원본 (언어 자동 판별, 힌트 없음)
+                    # result = self.model.transcribe(
+                    #     audio_np,
+                    #     fp16=torch.cuda.is_available(),
+                    # )
+                    started = time.time()
                     result = self.model.transcribe(
                         audio_np,
                         fp16=torch.cuda.is_available(),
+                        language=self.WHISPER_LANGUAGE,
+                        initial_prompt=self.INITIAL_PROMPT,
                     )
                     text = result["text"].strip()
+                    logprob = min((s["avg_logprob"] for s in result.get("segments", [])), default=None)
+                    self.get_logger().info(
+                        f"[WHISPER] {len(audio_np) / self.mic.SAMPLE_RATE:.1f}s -> “{text}” "
+                        f"(avg_logprob={logprob if logprob is None else round(logprob, 2)}, {time.time() - started:.2f}s)")
+                    # [2026-10-23] 무음·잡음에서 지어낸 문장("감사합니다", "다음 영상에서 만나요") 버림
+                    # 실측: 실제 말 -0.04~-0.27, 지어낸 문장 -2.6~-7.9 (힌트 문장 사용 시)
+                    if logprob is not None and logprob < self.MIN_AVG_LOGPROB:
+                        self.get_logger().info(f"[WHISPER] 신뢰도 낮음 (< {self.MIN_AVG_LOGPROB}) - 버림")
+                        continue
                     # [2026-10-06] 원본: text = re.sub(r'[^가-힣]+', '', text) 를 반환 (공백·숫자·문장부호 제거)
                     if re.sub(r'[^가-힣]+', '', text):
                         return text
@@ -552,6 +613,11 @@ class SpeechToCmd(Node):
                 stt_key = stt_key.replace("차장", "찾아")
                 stt_key = stt_key.replace("쳐자", "찾아")
                 stt_key = stt_key.replace("애디", "에디")
+                # [2026-10-23] 실측: "에디야"가 "애리야"/"에리아"로 들림
+                for heard in ("애리야", "에리야", "애리아", "에리아"):
+                    stt_key = stt_key.replace(heard, "에디야")
+                # [2026-10-23] 실측: "지금 상황 어때"가 "지금의 상황 어때"로 들림
+                stt_key = stt_key.replace("지금의", "지금")
                 
                 # play_audio("models/temp/stop_recording.wav")
 

@@ -117,8 +117,15 @@ openai_whisper:
   WHISPER_MODEL_NAME: "large-v3-turbo"
   MIC_SAMPLE_RATE: 16000
   ENERGY_THRESHOLD: 1000
-  RECORD_TIMEOUT: 2.0
+  # RECORD_TIMEOUT: 2.0   # [2026-10-23] 원본. 2초 넘는 명령이 잘려 두 조각으로 나뉘어 매칭 실패 ("지금 지하..." + "멈춰 입구 찾아")
+  RECORD_TIMEOUT: 4.0     # 한 문장 최대 녹음 길이(초). 말이 끝나고 0.8초 조용하면 바로 끊으므로 짧은 명령 반응 속도는 같음
   PHRASE_TIMEOUT: 1.0
+  # [2026-10-23] 샥즈 녹음 실측으로 정한 값 (말소리 rms 3000~4500, 주변 소음 rms 약 40)
+  LANGUAGE: "ko"                 # null 이면 자동 판별 (자동 판별 시 짧은 명령이 다른 언어로 판별될 수 있음)
+  INITIAL_PROMPT: "에디야, 멈춰. 에디야, 가자. 지금 상황 어때? 신호등 찾아."   # 호출어·명령 힌트 ("에디야"가 "애리야"로 들리던 문제)
+  MIN_AVG_LOGPROB: -1.0          # 이보다 낮으면 무음·잡음에서 지어낸 문장으로 보고 버림 (실제 말 -0.04~-0.27, 지어낸 문장 -2.6~-7.9)
+  # MAX_ENERGY_THRESHOLD: 1500   # [2026-10-23] 원본. 재연결 직후 보정이 1500으로 잘렸는데 말소리 rms가 1100~1400이라 작은 말은 놓칠 수 있음
+  MAX_ENERGY_THRESHOLD: 1000     # 주변 소음 보정 결과 상한 (보정 중 말소리가 섞이면 2000~3500 으로 튀던 문제, 평소 보정값 440~460)
 
 STT:
   use_trigger_word: True
