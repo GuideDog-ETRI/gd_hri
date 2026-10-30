@@ -1,7 +1,7 @@
 # "조용히 해" 발화 정지 설계서
 
 - 작성: 2026-10-29
-- 상태: **구현 완료, 실제 음성 연동 시험 전** (2026-10-30) — 13장 참고
+- 상태: **구현·연동 시험 완료** (2026-10-30) — 13장 참고
 - 범위: gdh 음성 인식·image_ai_node(Thor gdh), VLM3 guidedog-cli(Thor gd_vlm), TTS 서버(u-pc 192.168.2.12)
 - TTS 서버 작업 지시서: [`tts_quiet_work_order_261029.md`](tts_quiet_work_order_261029.md)
 
@@ -263,8 +263,13 @@
 | gdh STT | 코드·설정 반영, `stop_speech.enable: True` | 정지 단어 판별·콘솔 출력 단위 시험 |
 | gdh image_ai_node | 코드·설정 반영 (`zmq_ctl_addr: tcp://*:5556`) | 문법 확인 (연동 시험에서 확인) |
 | VLM guidedog-cli | `--zmq-ctl` 추가, 다시 빌드, `run_vlm3.sh` 반영 | 시험용 포트로 A~D 통과 (정지 30 ms, 기다리던 질문 버림, 0 토큰 정지) |
-| 실제 음성 연동 (10장 S1~S7) | gdh·VLM 10:00 재시작으로 적용 (VLM `--zmq-ctl` 5556 연결, STT `stop_speech enable: True` 확인) | 진행 전 |
+| 실제 음성 연동 (10장 S1~S7) | gdh·VLM 10:00 재시작으로 적용 (VLM `--zmq-ctl` 5556 연결, STT `stop_speech enable: True` 확인) | 10:00~10:08 시험 완료 (아래) |
 
+- 연동 시험 결과 (2026-10-30 10:00~10:08, 사용자 음성)
+  - "조용히 해" 8회 모두 인식 → `@quiet` 와 VLM 생성 중단 요청(`[QUIET]`)이 나감.
+  - 로봇이 말하던 6회는 TTS 서버에서 바로 끊김 (`🤫 말하던 문장 끊음`), 말하지 않던 2회는 아무 일 없음 (S5).
+  - 10:02 STT 재시작 뒤 4회는 인식 알림음(`@play notify`)도 같이 나감. 효과음 더킹은 같은 초 안에 풀림.
+  - VLM 이 답을 만드는 도중에 정지한 경우는 없었음 (답이 짧아 생성이 이미 끝난 뒤 말하는 중이었음) → VLM 쪽은 시험용 포트 시험(A~D)으로 확인.
 - 추가 기능: 받아쓴 문장마다 처리 결과를 gdh 실행 창에 한 줄로 출력 (`STT.console_print`, 🎤, 색 구분).
 - 남은 확인: 로봇 부하가 큰 상황에서 TTS 재생 underflow (`tts_server.log` 의 `⚠️ 재생 underflow`).
 
