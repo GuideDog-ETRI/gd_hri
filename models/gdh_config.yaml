@@ -96,6 +96,8 @@ vlm:
   # image_ai_node -> guidedog VLM 서버 (ZMQ XPUB)
   zmq_pub_addr: "tcp://*:5555"
   sub_timeout: 1.0      # VLM 서버(SUB) 연결 대기 시간(초), 넘으면 전송 취소
+  # [2026-10-30] "조용히 해": image_ai_node -> VLM 생성 중단 요청 (ZMQ PUB "@quiet"). VLM 은 run_vlm3.sh 의 --zmq-ctl 로 접속
+  zmq_ctl_addr: "tcp://*:5556"
   # prompts sent to SA-VLM server per voice command. {goal_x}, {goal_y} are replaced with the normalized goal point.
   # [2026-10-06] 2026-10-01 RFM lab 메일 양식 [요약]/[일반]/[상세] 사용 (src/utils/guidedog-zmq-test.py와 동일).
   #   [일반]/[상세]/[요약] 앞의 \n 은 학습 데이터 형식. goal은 학습 데이터처럼 소수점 2자리로 넣음. 빈 문자열이면 질문 없이 전송 (서버 -p 프롬프트). "이전:" 은 savlm-variants 문구
@@ -132,6 +134,15 @@ openai_whisper:
   MAX_ENERGY_THRESHOLD: 1000     # 주변 소음 보정 결과 상한 (보정 중 말소리가 섞이면 2000~3500 으로 튀던 문제, 평소 보정값 440~460)
 
 STT:
+  # [2026-10-30] 받아쓴 문장마다 처리 결과(명령/대화/정지/매칭 없음/버림)를 gdh 실행 창에 한 줄로 색 구분해 출력
+  console_print: True
+  # [2026-10-30] "조용히 해": 인식 문장에 words 중 하나가 들어 있으면 TTS 서버에 code 를 보내 쌓인 말을 버리고 말하던 문장을 끊고,
+  #   /GDH_quiet 를 발행해 VLM 이 만들던 답도 멈춤 (docs/stop_speech_design_261029.md)
+  stop_speech:
+    # enable: False   # [2026-10-30] 원본 (TTS 서버에 @quiet 처리가 들어가기 전)
+    enable: True      # [2026-10-30] TTS 서버(192.168.2.12) @quiet 적용 완료 (09:52 재시작, tts_quiet_report_261030.md). False 면 "조용히 해" 무시
+    words: ["조용히해", "조용히하세요", "조용히좀해"]   # 공백 무시, 인식 문장에 들어 있으면 정지 (호출어·군말이 붙어도 됨)
+    code: "@quiet"
   use_trigger_word: True
   trigger_word: "에디야"
   # [2026-10-06] 대화 모드: start_words 로 시작, end_words 로 종료 (트리거 단어 없이도 인식, 공백 무시).

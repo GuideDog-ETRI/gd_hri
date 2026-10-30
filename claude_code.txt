@@ -76,4 +76,40 @@ GDH (Guide Dog HRI) — Claude Code 수정 이력
 ■ 관련 파일
   - run_gdh_all.sh (미수정, 검토 필요)
 
+--------------------------------------------------------------------------------
+[2026-10-30]  "조용히 해" 발화 즉시 정지, 음성 인식 결과 콘솔 출력
+--------------------------------------------------------------------------------
+
+■ 내용
+  - "조용히 해"(조용히 하세요 / 조용히 좀 해, 호출어·군말이 붙어도 됨)를 들으면
+    1) TTS 서버(192.168.2.12)로 "@quiet" → 쌓인 말을 버리고 말하던 문장을 끊음 (40~72 ms)
+       이어서 다른 명령과 같은 인식 알림음 "@play notify" (띨링)
+    2) /GDH_quiet → image_ai_node → ZMQ PUB 5556 "@quiet" → VLM 이 지금 답의 생성을 멈추고,
+       기다리던 질문을 버리고, 이미 보낸 조각이 있으면 TTS 로 "@quiet" 를 보냄
+  - 받아쓴 문장마다 처리 결과(명령/대화/정지/매칭 없음/버림)를 gdh 실행 창에 한 줄로 색 구분 출력 (🎤)
+
+■ 수정 (gdh 는 기존 줄 삭제 없이 추가만)
+  - src/gdh_speech_audio/gdh_speech_audio/speech_to_cmd_by_whisper.py
+  - src/gdh_vlm_client/gdh_vlm_client/image_ai_node_fast.py
+  - models/gdh_config.yaml : STT.console_print, STT.stop_speech, vlm.zmq_ctl_addr
+  - (gd_vlm) on-device-guidedog/VLM3/source/llama.cpp-savlmv3/tools/mtmd/guidedog-cli.cpp : --zmq-ctl
+             (바꾼 원본 줄은 // [2026-10-30] 원본: 주석), 다시 빌드
+  - (gd_vlm) on-device-guidedog/run_vlm3.sh : --zmq-ctl tcp://localhost:5556
+  - (u-pc)   ~/TTS_Monitoring/tts-kor-server.py : @quiet (u-pc Claude 구현, docs/tts_quiet_report_261030.md)
+
+■ 시험
+  - STT: 정지 단어 판별, 콘솔 출력 (모듈을 불러와 단위 시험)
+  - VLM: 시험용 포트로 따로 띄워 시험. A 평소 동작 / B 답 중 정지 (30 ms, 기다리던 질문 버림, @quiet 전송) /
+         C 쉬는 중 정지 후 다음 질문 정상 / D 이미지 처리 중 정지 (0 토큰, @quiet 안 보냄) 모두 통과
+  - TTS 서버: T1~T7 통과 (u-pc 보고서)
+  - 실제 음성 연동 시험: gdh·VLM 을 다시 띄운 뒤 진행
+
+■ 되돌리기
+  - gdh: models/gdh_config.yaml 의 STT.stop_speech.enable: False (기능만 끔), 또는 git checkout 으로 위 파일 복원
+  - VLM: guidedog-cli.cpp.before_quiet, run_vlm3.sh.before_quiet, build/bin/llama-guidedog-cli.before_quiet 로 복원
+  - TTS 서버: u-pc 에서 cp tts-kor-server.py.before_quiet tts-kor-server.py 후 bash npu/restart_server.sh
+
+■ 문서
+  - docs/stop_speech_design_261029.md (설계), docs/tts_quiet_work_order_261029.md (TTS 서버 작업 지시서)
+
 ================================================================================

@@ -85,6 +85,23 @@ def pactl_json(*args):
     out = subprocess.check_output(["pactl", "-f", "json", *args], env=PACTL_ENV, timeout=PACTL_TIMEOUT)
     return json.loads(out)
 
+# ──────────────────  [2026-10-30] 음성 인식 결과 콘솔 출력  ──────────────────
+# 받아쓴 문장마다 처리 결과를 gdh 실행 창에 한 줄로 눈에 띄게 출력 (로그 줄 사이에서 찾기 쉽게 색 구분).
+# gdh_config.yaml 의 STT.console_print: False 로 끔
+CONSOLE_PRINT = True
+from datetime import timezone
+_KST = timezone(timedelta(hours=9), "KST")   # gdh 컨테이너는 시간대가 UTC 라서 한국 시각으로 표시
+_CONSOLE_COLORS = {"명령": "\033[1;32m", "대화": "\033[1;36m", "정지": "\033[1;35m",
+                   "매칭 없음": "\033[33m", "버림": "\033[90m"}
+
+def console_stt(text: str, result: str, kind: str):
+    """kind: 명령 / 대화 / 정지 / 매칭 없음 / 버림 (색 구분)"""
+    if not CONSOLE_PRINT:
+        return
+    if len(text) > 60:
+        text = text[:60] + "…"
+    print(f"{_CONSOLE_COLORS.get(kind, '')}🎤 [{datetime.now(_KST):%H:%M:%S}] “{text}” → {result}\033[0m", flush=True)
+
 
 class SpeechToTextClient(Node):
     """
@@ -526,16 +543,20 @@ class SpeechToTextClient(Node):
                     # 실측: 실제 말 -0.04~-0.27, 지어낸 문장 -2.6~-7.9 (힌트 문장 사용 시)
                     if logprob is not None and logprob < self.MIN_AVG_LOGPROB:
                         self.get_logger().info(f"[WHISPER] 신뢰도 낮음 (< {self.MIN_AVG_LOGPROB}) - 버림")
+                        console_stt(text, f"버림 (신뢰도 낮음 {logprob:.2f})", "버림")   # [2026-10-30]
                         continue
                     # [2026-10-23] 같은 말이 반복되는 결과 버림 (Whisper compression_ratio: 반복이 많을수록 큼)
                     # 실측(오늘 667건): 실제 명령 문장 최대 1.35, 반복 문장 2.35("전통, 전통, ...")·27.9("어, 어, ...")
                     ratio = max((s.get("compression_ratio", 0.0) for s in result.get("segments", [])), default=0.0)
                     if ratio > self.MAX_COMPRESSION_RATIO:
                         self.get_logger().info(f"[WHISPER] 반복 문장 (compression_ratio {ratio:.2f} > {self.MAX_COMPRESSION_RATIO}) - 버림")
+                        console_stt(text, "버림 (반복 문장)", "버림")   # [2026-10-30]
                         continue
                     # [2026-10-06] 원본: text = re.sub(r'[^가-힣]+', '', text) 를 반환 (공백·숫자·문장부호 제거)
                     if re.sub(r'[^가-힣]+', '', text):
                         return text
+                    elif text:   # [2026-10-30] 한글이 없는 결과도 콘솔에 표시
+                        console_stt(text, "버림 (한글 없음)", "버림")
                 except Exception as e:
                     self.get_logger().error(f"Whisper error: {e}")
                     return None
@@ -626,6 +647,21 @@ class SpeechToCmd(Node):
         self.get_logger().info(f"dialog use_timeout: {self.dialog_use_timeout}, timeout_sec: {self.dialog_timeout_sec}")
         self.publisher_dialog = self.create_publisher(String, "/GDH_dialog_text", 1)
         self.speak_client = self.create_client(GDHSpeakText, '/GDH_speak_text')
+
+        # [2026-10-30] "조용히 해": 인식 문장에 정지 단어가 들어 있으면 TTS 서버에 code("@quiet")를 보내
+        # 쌓인 말을 버리고 말하던 문장을 끊고, /GDH_quiet 를 발행해 VLM 이 만들던 답도 멈춤 (image_ai_node -> VLM).
+        # 설계: docs/stop_speech_design_261029.md. 설정이 없으면 꺼짐
+        stop_conf = conf['STT'].get('stop_speech') or {}
+        self.stop_enable = bool(stop_conf.get('enable', False))
+        self.stop_words = [k for k in (str(w).replace(" ", "") for w in stop_conf.get('words') or []) if k]
+        self.stop_code = stop_conf.get('code') or "@quiet"
+        self.get_logger().info(f"stop_speech enable: {self.stop_enable}, words: {self.stop_words}, code: {self.stop_code}")
+        self.publisher_quiet = self.create_publisher(String, "/GDH_quiet", 1)
+
+        # [2026-10-30] 음성 인식 결과 콘솔 출력 (console_stt)
+        global CONSOLE_PRINT
+        CONSOLE_PRINT = bool(conf['STT'].get('console_print', True))
+        self.get_logger().info(f"console_print: {CONSOLE_PRINT}")
 
         # STT
         self.stt_client = SpeechToTextClient()
@@ -722,12 +758,26 @@ class SpeechToCmd(Node):
                 
                 # play_audio("models/temp/stop_recording.wav")
 
+                # [2026-10-30] "조용히 해": 대화 모드 시작/종료·명령 매칭보다 먼저 검사
+                #   (늦게 검사하면 대화 모드에서 VLM 질문으로 넘어가 또 답을 말함). 기존 명령과 달리 "들어 있으면" 정지
+                #   1) TTS 서버: 쌓인 말 버리고 말하던 문장 끊기  2) /GDH_quiet -> image_ai_node -> VLM 생성 중단
+                if self.stop_enable and any(w in stt_key for w in self.stop_words):
+                    self._speak(self.stop_code)
+                    # 다른 명령과 같이 인식 알림음. "@quiet" 다음에 보냄 (말을 먼저 끊음, 효과음은 별도 재생기라 @quiet 에 안 끊김)
+                    self._speak("@play notify")
+                    self.publisher_quiet.publish(String(data=stt_result))
+                    self.get_logger().info(f"[STOP] “{stt_result}” -> {self.stop_code}, /GDH_quiet")
+                    console_stt(stt_result, f"정지 ({self.stop_code})", "정지")
+                    continue
+
                 # [2026-10-06] 대화 모드 시작/종료
                 if stt_key in self.dialog_start_words:
                     self._set_dialog_mode(True, stt_key)
+                    console_stt(stt_result, "대화 모드 시작", "대화")   # [2026-10-30]
                     continue
                 if self.dialog_mode and stt_key in self.dialog_end_words:
                     self._set_dialog_mode(False, stt_key)
+                    console_stt(stt_result, "대화 모드 종료", "대화")   # [2026-10-30]
                     continue
 
                 if stt_key in self.commands:
@@ -740,6 +790,7 @@ class SpeechToCmd(Node):
                     # (기본값 NONE=0 은 usr_cmd에서 GO_FORWARD=0 과 같아 전진 명령으로 오인됨)
                     if not hasattr(UserCommand, info["usr_cmd"]):
                         self.get_logger().error(f"UserCommand.{info['usr_cmd']} 없음 (gd_ifc_pkg 업데이트 필요) - 발행 안 함")
+                        console_stt(stt_result, f"명령 {info['usr_cmd']} 없음 (gd_ifc_pkg) - 발행 안 함", "매칭 없음")   # [2026-10-30]
                         continue
 
                     msg.usr_cmd   = getattr(UserCommand, info["usr_cmd"],   UserCommand.NONE)
@@ -747,12 +798,15 @@ class SpeechToCmd(Node):
 
                     self.publisher_cmd.publish(msg)
                     self.get_logger().info(f"Published: {msg.usr_cmd}, {msg.cmd_param}")
+                    console_stt(stt_result, f"명령 {info['usr_cmd']}", "명령")   # [2026-10-30]
                 elif self.dialog_mode:
                     # [2026-10-06] 대화 모드: 명령이 아닌 문장은 원문 그대로 VLM 자유 질문으로
                     self.publisher_dialog.publish(String(data=stt_result))
                     self.get_logger().info(f"Dialog question published: {stt_result}")
+                    console_stt(stt_result, "VLM 질문 (대화 모드)", "대화")   # [2026-10-30]
                 else:
                     self.get_logger().info("No matched command.")
+                    console_stt(stt_result, "매칭 없음", "매칭 없음")   # [2026-10-30]
             except Exception as e:
                 self.get_logger().error(f"Error: {e}")
 

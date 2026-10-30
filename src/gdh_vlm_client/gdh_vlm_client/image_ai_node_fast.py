@@ -148,6 +148,21 @@ class QwenImageSubscriberNode(Node):
             self.get_logger().error(f'ZMQ initialization error: {e}')
             raise
 
+        # [2026-10-30] "조용히 해": /GDH_quiet 를 받으면 VLM 서버에 "@quiet" 를 보내 지금 만들던 답의 생성을 멈추게 함
+        # (VLM 은 run_vlm3.sh 의 --zmq-ctl 로 이 주소에 SUB 접속. 연결되어 있지 않으면 PUB 이 그냥 버림)
+        # bind 에 실패해도 질문 전송 등 기존 기능은 그대로 동작하게 함 (정지 요청만 못 보냄)
+        self.zmq_ctl_addr = vlm_conf.get('zmq_ctl_addr', "tcp://*:5556")
+        self.ctl_socket = None
+        try:
+            self.ctl_socket = self.zmq_context.socket(zmq.PUB)
+            self.ctl_socket.bind(self.zmq_ctl_addr)
+            self.get_logger().info(f"[Producer] VLM control PUB socket bound to {self.zmq_ctl_addr}")
+        except zmq.ZMQError as e:
+            if self.ctl_socket is not None:
+                self.ctl_socket.close(linger=0)
+            self.ctl_socket = None
+            self.get_logger().error(f'ZMQ control socket error ({self.zmq_ctl_addr}): {e} - "조용히 해" VLM 생성 중단 사용 불가')
+
         self.image_lock = Lock()
         self.cv_image_resized = None
 
@@ -177,6 +192,14 @@ class QwenImageSubscriberNode(Node):
             String,
             '/GDH_dialog_text',
             self.dialog_callback,
+            10
+        )
+
+        # [2026-10-30] "조용히 해" (speech_to_cmd 가 정지 단어를 들으면 인식 원문을 보냄)
+        self.quiet_sub = self.create_subscription(
+            String,
+            '/GDH_quiet',
+            self.quiet_callback,
             10
         )
 
@@ -440,6 +463,18 @@ class QwenImageSubscriberNode(Node):
         except Exception as e:
             self.get_logger().error(f'Error in dialog_callback: {e}')
 
+    def quiet_callback(self, msg: String):
+        """[2026-10-30] "조용히 해": VLM 서버에 지금 만들던 답의 생성 중단 요청.
+        VLM 은 다음 토큰에서 생성을 멈추고, 기다리던 질문을 버리고, 이미 보낸 조각이 있으면 TTS 서버에 "@quiet" 를 보냄"""
+        if self.ctl_socket is None:
+            self.get_logger().warning(f"[QUIET] VLM 제어 소켓 없음 - 생성 중단 요청 못 보냄 (“{msg.data}”)")
+            return
+        try:
+            self.ctl_socket.send(b"@quiet", zmq.NOBLOCK)
+            self.get_logger().info(f"[QUIET] VLM 에 생성 중단 요청 (“{msg.data}”)")
+        except zmq.ZMQError as e:
+            self.get_logger().error(f"[QUIET] VLM 생성 중단 요청 실패: {e}")
+
 
     def call_speak_service(self, sentence: str):
         req = GDHSpeakText.Request()
@@ -473,6 +508,9 @@ def main(args=None):
     finally:
         # Clean up ZMQ resources safely
         try:
+            # [2026-10-30] "조용히 해" VLM 제어 소켓 (열려 있으면 context.term() 이 기다리므로 먼저 닫음)
+            if getattr(node, 'ctl_socket', None) is not None:
+                node.ctl_socket.close(linger=0)
             node.socket.close(linger=0)
             node.zmq_context.term()
         except Exception as e:
